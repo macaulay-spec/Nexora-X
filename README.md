@@ -39,11 +39,41 @@ npm run build
 npm run start
 ```
 
-## Vercel deployment note
+## Deployment notes
 
 This repo includes `vercel.json` so Vercel builds the frontend as a **Vite** app instead of trying to detect Next.js.
 
 For the full realtime Socket.io multiplayer server, deploy the Node server to a WebSocket-capable host such as Railway, Render, Fly.io, or a VPS. Vercel can serve the static frontend, but standard Vercel serverless deployments are not ideal for long-lived in-memory Socket.io game rooms.
+
+### Option A — One WebSocket-capable host
+
+Deploy this whole repo to Render/Railway/Fly and run:
+
+```bash
+npm run build
+npm run start
+```
+
+The Node server serves both the built frontend and Socket.io backend on the same origin.
+
+### Option B — Vercel frontend + separate backend
+
+1. Deploy the backend to Render/Railway/Fly.
+2. Set backend env:
+
+```bash
+CLIENT_ORIGIN=https://your-vercel-app.vercel.app
+```
+
+3. Set Vercel env:
+
+```bash
+VITE_SOCKET_URL=https://your-backend-url.example.com
+```
+
+4. Redeploy Vercel.
+
+See `.env.example` and `render.yaml`.
 
 ## How to test alone
 

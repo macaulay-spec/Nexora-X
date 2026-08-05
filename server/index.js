@@ -10,6 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
 const isProduction = process.env.NODE_ENV === 'production';
 const port = Number(process.env.PORT || 5173);
+const clientOrigin = process.env.CLIENT_ORIGIN || true;
 
 const PHASES = {
   WAITING: 'waiting',
@@ -39,6 +40,29 @@ const DEFAULT_SETTINGS = {
 const botNames = ['Hana', 'Minseo', 'Jisoo', 'Dae', 'Yuri', 'Jun', 'Sora', 'Mina', 'Taeyang', 'Nari', 'Eun', 'Rin'];
 const colors = ['#c4123d', '#8b1731', '#37456d', '#315f4d', '#2b5d90', '#5a4469', '#6d4c34', '#494e62', '#7b354b', '#3f6b72'];
 const rooms = new Map();
+
+function clampNumber(value, fallback, min, max) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(parsed)));
+}
+
+function sanitizeSettings(settings = {}) {
+  return {
+    ...DEFAULT_SETTINGS,
+    maxPlayers: clampNumber(settings.maxPlayers, DEFAULT_SETTINGS.maxPlayers, 4, 20),
+    roleRevealSeconds: clampNumber(settings.roleRevealSeconds, DEFAULT_SETTINGS.roleRevealSeconds, 5, 45),
+    daySeconds: clampNumber(settings.daySeconds, DEFAULT_SETTINGS.daySeconds, 30, 300),
+    votingSeconds: clampNumber(settings.votingSeconds, DEFAULT_SETTINGS.votingSeconds, 20, 120),
+    voteResultSeconds: clampNumber(settings.voteResultSeconds, DEFAULT_SETTINGS.voteResultSeconds, 5, 30),
+    nightSeconds: clampNumber(settings.nightSeconds, DEFAULT_SETTINGS.nightSeconds, 30, 180),
+    nightResultSeconds: clampNumber(settings.nightResultSeconds, DEFAULT_SETTINGS.nightResultSeconds, 5, 30),
+    anonymousVotes: settings.anonymousVotes === undefined ? DEFAULT_SETTINGS.anonymousVotes : Boolean(settings.anonymousVotes),
+    revealEliminatedRoles: settings.revealEliminatedRoles === undefined ? DEFAULT_SETTINGS.revealEliminatedRoles : Boolean(settings.revealEliminatedRoles),
+    allowSpectators: settings.allowSpectators === undefined ? DEFAULT_SETTINGS.allowSpectators : Boolean(settings.allowSpectators),
+    tieRule: ['no_elimination', 'random'].includes(settings.tieRule) ? settings.tieRule : DEFAULT_SETTINGS.tieRule,
+  };
+}
 
 function makeRoomCode() {
   let code = '';
@@ -462,9 +486,18 @@ function ackOk(ack, payload = {}) {
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
-  cors: { origin: true, credentials: true },
+  cors: { origin: clientOrigin, credentials: true },
 });
 
+app.use((req, res, next) => {
+  if (clientOrigin && clientOrigin !== true) {
+    res.setHeader('Access-Control-Allow-Origin', clientOrigin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  }
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
 app.use(express.json());
 app.get('/api/health', (_req, res) => res.json({ ok: true, rooms: rooms.size }));
 
@@ -482,7 +515,7 @@ io.on('connection', (socket) => {
       code,
       hostId: player.id,
       status: 'waiting',
-      settings: { ...DEFAULT_SETTINGS, ...(payload.settings || {}) },
+      settings: sanitizeSettings(payload.settings || {}),
       players: new Map([[player.id, player]]),
       messages: [],
       game: null,
@@ -528,6 +561,18 @@ io.on('connection', (socket) => {
     if (!room || room.status !== 'waiting') return ackError(ack, 'You are not in a waiting room.');
     const player = room.players.get(sessionId);
     player.ready = Boolean(payload.ready);
+    ackOk(ack);
+    emitRoom(room);
+  });
+
+  socket.on('room:updateSettings', (payload = {}, ack) => {
+    const room = findRoomForPlayer(sessionId);
+    if (!room || !isHost(room, sessionId)) return ackError(ack, 'Only the host can update room settings.');
+    if (room.status !== 'waiting') return ackError(ack, 'Settings can only be changed before the game starts.');
+    const nextSettings = sanitizeSettings({ ...room.settings, ...(payload.settings || {}) });
+    if (nextSettings.maxPlayers < room.players.size) return ackError(ack, `Max players cannot be below the current player count (${room.players.size}).`);
+    room.settings = nextSettings;
+    systemMessage(room, 'Room settings were updated.');
     ackOk(ack);
     emitRoom(room);
   });

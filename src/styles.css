@@ -1291,3 +1291,125 @@ button:disabled {
     top: max(46px, calc(42px + env(safe-area-inset-top)));
   }
 }
+
+.quick-settings,
+.lobby-settings-card,
+.settings-summary {
+  margin-top: 0.85rem;
+}
+
+.quick-settings,
+.lobby-settings-card {
+  padding: 0.85rem;
+  border: 1px solid rgba(255, 255, 255, 0.085);
+  border-radius: 22px;
+  background: rgba(18, 20, 33, 0.62);
+  backdrop-filter: blur(18px);
+}
+
+.quick-settings .section-title,
+.lobby-settings-card .section-title {
+  margin-top: 0;
+}
+
+.settings-summary {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.settings-summary span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0.38rem 0.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.055);
+  color: #cbd1e3;
+  font-size: 0.7rem;
+  font-weight: 850;
+}
+
+.number-stepper,
+.toggle-setting {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
+  width: 100%;
+  min-height: 42px;
+  margin-top: 0.55rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.045);
+  color: #dfe3f0;
+}
+
+.number-stepper > span,
+.toggle-setting > span {
+  color: #cbd1e3;
+  font-size: 0.78rem;
+  font-weight: 850;
+  text-align: left;
+}
+
+.number-stepper div {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.number-stepper button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.09);
+  color: #fff;
+  font-weight: 950;
+}
+
+.number-stepper strong {
+  min-width: 52px;
+  color: #fff;
+  text-align: center;
+  font-size: 0.8rem;
+}
+
+.toggle-setting {
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  cursor: pointer;
+}
+
+.toggle-setting i {
+  position: relative;
+  flex: 0 0 auto;
+  width: 46px;
+  height: 27px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.toggle-setting i b {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 19px;
+  height: 19px;
+  border-radius: 999px;
+  background: #fff;
+  transition: transform 0.18s ease;
+}
+
+.toggle-setting i.active {
+  background: #c4123d;
+  box-shadow: 0 0 18px rgba(196, 18, 61, 0.22);
+}
+
+.toggle-setting i.active b {
+  transform: translateX(19px);
+}

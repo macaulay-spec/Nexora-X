@@ -5,6 +5,16 @@ type Phase = 'roleReveal' | 'dayDiscussion' | 'voting' | 'voteResult' | 'nightAc
 type PlayerRole = 'Mafia' | 'Citizen' | 'Detective' | 'Doctor';
 type Team = 'Mafia' | 'Citizens';
 
+type RoomSettings = {
+  maxPlayers: number;
+  daySeconds: number;
+  votingSeconds: number;
+  nightSeconds: number;
+  anonymousVotes: boolean;
+  revealEliminatedRoles: boolean;
+  allowSpectators: boolean;
+};
+
 type Player = {
   id: string;
   name: string;
@@ -43,7 +53,7 @@ type ServerState = {
     code: string;
     status: 'waiting' | 'active' | 'finished';
     hostId: string;
-    settings: Record<string, unknown>;
+    settings: RoomSettings;
     createdAt: number;
   };
   me: Player | null;
@@ -70,6 +80,27 @@ type Ack = { ok: boolean; error?: string; code?: string; playerId?: string };
 
 const SESSION_KEY = 'midnight-vote-session-id';
 const NAME_KEY = 'midnight-vote-display-name';
+const SETTINGS_KEY = 'midnight-vote-room-settings';
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || undefined;
+
+const defaultRoomSettings: RoomSettings = {
+  maxPlayers: 12,
+  daySeconds: 90,
+  votingSeconds: 45,
+  nightSeconds: 60,
+  anonymousVotes: true,
+  revealEliminatedRoles: false,
+  allowSpectators: true,
+};
+
+function loadRoomSettings(): RoomSettings {
+  try {
+    return { ...defaultRoomSettings, ...JSON.parse(window.localStorage.getItem(SETTINGS_KEY) || '{}') };
+  } catch {
+    return defaultRoomSettings;
+  }
+}
+
 let activeSocket: Socket | null = null;
 
 function getSessionId() {
@@ -104,14 +135,15 @@ export default function App() {
   const [connected, setConnected] = useState(false);
   const [state, setState] = useState<ServerState | null>(null);
   const [displayName, setDisplayName] = useState(() => window.localStorage.getItem(NAME_KEY) || 'Macaulay');
-  const [roomCode, setRoomCode] = useState('');
+  const [roomCode, setRoomCode] = useState(() => new URLSearchParams(window.location.search).get('room')?.toUpperCase() || '');
+  const [settings, setSettings] = useState<RoomSettings>(() => loadRoomSettings());
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [showHost, setShowHost] = useState(false);
   const [clock, setClock] = useState(Date.now());
 
   useEffect(() => {
-    const client = io({ auth: { sessionId: getSessionId() } });
+    const client = io(SOCKET_URL, { auth: { sessionId: getSessionId() } });
     activeSocket = client;
     setSocket(client);
 
@@ -138,6 +170,10 @@ export default function App() {
     window.localStorage.setItem(NAME_KEY, displayName);
   }, [displayName]);
 
+  useEffect(() => {
+    window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  }, [settings]);
+
   const secondsLeft = useMemo(() => {
     const endsAt = state?.game?.phaseEndsAt;
     if (!endsAt) return 0;
@@ -157,7 +193,7 @@ export default function App() {
   };
 
   const createRoom = async () => {
-    const ack = await emitAck('room:create', { name: displayName });
+    const ack = await emitAck('room:create', { name: displayName, settings });
     if (ack.ok && ack.code) setRoomCode(ack.code);
   };
 
@@ -202,6 +238,8 @@ export default function App() {
               setRoomCode={setRoomCode}
               onCreate={createRoom}
               onJoin={joinRoom}
+              settings={settings}
+              setSettings={setSettings}
             />
           )}
 
@@ -211,6 +249,7 @@ export default function App() {
               onReady={(ready) => emitAck('player:ready', { ready })}
               onAddBot={() => emitAck('room:addBot')}
               onStart={() => emitAck('game:start')}
+              onUpdateSettings={(nextSettings) => emitAck('room:updateSettings', { settings: nextSettings })}
             />
           )}
 
@@ -300,6 +339,8 @@ function Onboarding({
   setRoomCode,
   onCreate,
   onJoin,
+  settings,
+  setSettings,
 }: {
   displayName: string;
   setDisplayName: (value: string) => void;
@@ -307,6 +348,8 @@ function Onboarding({
   setRoomCode: (value: string) => void;
   onCreate: () => void;
   onJoin: () => void;
+  settings: RoomSettings;
+  setSettings: (settings: RoomSettings) => void;
 }) {
   return (
     <div className="content onboarding-screen">
@@ -326,6 +369,14 @@ function Onboarding({
         <button className="primary" onClick={onJoin}>Join Room</button>
         <button className="secondary" onClick={onCreate}>Create Room</button>
       </div>
+      <div className="quick-settings">
+        <div className="section-title"><span>Host quick settings</span><em>Used when creating</em></div>
+        <NumberStepper label="Max players" value={settings.maxPlayers} min={4} max={20} onChange={(value) => setSettings({ ...settings, maxPlayers: value })} />
+        <NumberStepper label="Day timer" value={settings.daySeconds} min={30} max={300} step={30} suffix="s" onChange={(value) => setSettings({ ...settings, daySeconds: value })} />
+        <NumberStepper label="Night timer" value={settings.nightSeconds} min={30} max={180} step={15} suffix="s" onChange={(value) => setSettings({ ...settings, nightSeconds: value })} />
+        <ToggleSetting label="Anonymous votes" active={settings.anonymousVotes} onChange={(value) => setSettings({ ...settings, anonymousVotes: value })} />
+        <ToggleSetting label="Reveal eliminated roles" active={settings.revealEliminatedRoles} onChange={(value) => setSettings({ ...settings, revealEliminatedRoles: value })} />
+      </div>
       <p className="safety-note">Safe fictional gameplay only — no device locking, threats, or harmful mechanics.</p>
     </div>
   );
@@ -336,13 +387,18 @@ function Lobby({
   onReady,
   onAddBot,
   onStart,
+  onUpdateSettings,
 }: {
   state: ServerState;
   onReady: (ready: boolean) => void;
   onAddBot: () => void;
   onStart: () => void;
+  onUpdateSettings: (settings: RoomSettings) => void;
 }) {
   const readyCount = state.players.filter((player) => player.ready).length;
+  const inviteUrl = `${window.location.origin}${window.location.pathname}?room=${state.room.code}`;
+  const copyInvite = () => navigator.clipboard?.writeText(inviteUrl);
+  const updateSetting = <K extends keyof RoomSettings>(key: K, value: RoomSettings[K]) => onUpdateSettings({ ...state.room.settings, [key]: value });
   return (
     <div className="content scrollable">
       <PageHeader title="Waiting Lobby" kicker="Room code" right={state.room.code} />
@@ -351,8 +407,26 @@ function Lobby({
           <span>Invite code</span>
           <strong>{state.room.code}</strong>
         </div>
-        <button className="tiny-button" onClick={() => navigator.clipboard?.writeText(state.room.code)}>Copy</button>
+        <button className="tiny-button" onClick={copyInvite}>Copy Invite</button>
       </div>
+      <div className="settings-summary">
+        <span>{state.room.settings.maxPlayers} max</span>
+        <span>{state.room.settings.daySeconds}s day</span>
+        <span>{state.room.settings.nightSeconds}s night</span>
+        <span>{state.room.settings.anonymousVotes ? 'Anonymous votes' : 'Public votes'}</span>
+      </div>
+      {state.me?.host && (
+        <div className="lobby-settings-card">
+          <div className="section-title"><span>Room settings</span><em>Before start</em></div>
+          <NumberStepper label="Max players" value={state.room.settings.maxPlayers} min={4} max={20} onChange={(value) => updateSetting('maxPlayers', value)} />
+          <NumberStepper label="Day timer" value={state.room.settings.daySeconds} min={30} max={300} step={30} suffix="s" onChange={(value) => updateSetting('daySeconds', value)} />
+          <NumberStepper label="Voting timer" value={state.room.settings.votingSeconds} min={20} max={120} step={5} suffix="s" onChange={(value) => updateSetting('votingSeconds', value)} />
+          <NumberStepper label="Night timer" value={state.room.settings.nightSeconds} min={30} max={180} step={15} suffix="s" onChange={(value) => updateSetting('nightSeconds', value)} />
+          <ToggleSetting label="Anonymous votes" active={state.room.settings.anonymousVotes} onChange={(value) => updateSetting('anonymousVotes', value)} />
+          <ToggleSetting label="Reveal eliminated roles" active={state.room.settings.revealEliminatedRoles} onChange={(value) => updateSetting('revealEliminatedRoles', value)} />
+          <ToggleSetting label="Allow spectators" active={state.room.settings.allowSpectators} onChange={(value) => updateSetting('allowSpectators', value)} />
+        </div>
+      )}
       <div className="section-title"><span>Players</span><em>{readyCount}/{state.players.length} ready</em></div>
       <div className="player-list">
         {state.players.map((player) => <PlayerRow key={player.id} player={player} />)}
@@ -649,6 +723,46 @@ function ChatPanel({ state, defaultChannel, compact = false }: { state: ServerSt
         </div>
       )}
     </div>
+  );
+}
+
+
+function NumberStepper({
+  label,
+  value,
+  min,
+  max,
+  step = 1,
+  suffix = '',
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  suffix?: string;
+  onChange: (value: number) => void;
+}) {
+  const clamp = (next: number) => Math.min(max, Math.max(min, next));
+  return (
+    <div className="number-stepper">
+      <span>{label}</span>
+      <div>
+        <button onClick={() => onChange(clamp(value - step))}>−</button>
+        <strong>{value}{suffix}</strong>
+        <button onClick={() => onChange(clamp(value + step))}>+</button>
+      </div>
+    </div>
+  );
+}
+
+function ToggleSetting({ label, active, onChange }: { label: string; active: boolean; onChange: (active: boolean) => void }) {
+  return (
+    <button className="toggle-setting" onClick={() => onChange(!active)}>
+      <span>{label}</span>
+      <i className={active ? 'active' : ''}><b /></i>
+    </button>
   );
 }
 
