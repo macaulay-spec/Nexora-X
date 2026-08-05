@@ -1,0 +1,17 @@
+{
+  "name": "Midnight Vote Prototype",
+  "short_name": "Midnight Vote",
+  "description": "A fictional mobile-first social deduction party game prototype.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#070810",
+  "theme_color": "#c4123d",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/midnight-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
