@@ -2,7 +2,7 @@ import express from 'express';
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { Server } from 'socket.io';
 import { createServer as createViteServer } from 'vite';
 
@@ -40,6 +40,52 @@ const DEFAULT_SETTINGS = {
 const botNames = ['Hana', 'Minseo', 'Jisoo', 'Dae', 'Yuri', 'Jun', 'Sora', 'Mina', 'Taeyang', 'Nari', 'Eun', 'Rin'];
 const colors = ['#c4123d', '#8b1731', '#37456d', '#315f4d', '#2b5d90', '#5a4469', '#6d4c34', '#494e62', '#7b354b', '#3f6b72'];
 const rooms = new Map();
+const users = new Map();
+const usersByEmail = new Map();
+
+function normalizeEmail(email) {
+  return String(email || '').trim().toLowerCase();
+}
+
+function hashPassword(password) {
+  return createHash('sha256').update(String(password || '')).digest('hex');
+}
+
+function publicUser(user) {
+  if (!user) return null;
+  return {
+    id: user.id,
+    sessionId: user.sessionId,
+    email: user.email,
+    displayName: user.displayName,
+    role: user.role,
+    avatar: user.avatar,
+    createdAt: user.createdAt,
+    stats: user.stats,
+  };
+}
+
+function userFromAuthHeader(req) {
+  const header = String(req.headers.authorization || '');
+  const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+  if (!token) return null;
+  return [...users.values()].find((user) => user.sessionId === token) || null;
+}
+
+function requireUser(req, res, next) {
+  const user = userFromAuthHeader(req);
+  if (!user) return res.status(401).json({ ok: false, error: 'Authentication required.' });
+  req.user = user;
+  next();
+}
+
+function requireAdmin(req, res, next) {
+  const user = userFromAuthHeader(req);
+  if (!user) return res.status(401).json({ ok: false, error: 'Authentication required.' });
+  if (user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin access required.' });
+  req.user = user;
+  next();
+}
 
 function clampNumber(value, fallback, min, max) {
   const parsed = Number(value);
@@ -501,13 +547,91 @@ app.use((req, res, next) => {
 app.use(express.json());
 app.get('/api/health', (_req, res) => res.json({ ok: true, rooms: rooms.size }));
 
+app.post('/api/auth/register', (req, res) => {
+  const email = normalizeEmail(req.body?.email);
+  const displayName = cleanName(req.body?.displayName) || 'Player';
+  const password = String(req.body?.password || '');
+  if (!email.includes('@')) return res.status(400).json({ ok: false, error: 'Enter a valid email address.' });
+  if (password.length < 6) return res.status(400).json({ ok: false, error: 'Password must be at least 6 characters.' });
+  if (usersByEmail.has(email)) return res.status(409).json({ ok: false, error: 'An account with that email already exists.' });
+  const id = randomUUID();
+  const user = {
+    id,
+    sessionId: randomUUID(),
+    email,
+    displayName,
+    passwordHash: hashPassword(password),
+    role: users.size === 0 || email === 'admin@midnight.vote' ? 'admin' : 'player',
+    avatar: displayName.slice(0, 1).toUpperCase(),
+    createdAt: now(),
+    stats: { wins: 0, matches: 0, gamesHosted: 0 },
+  };
+  users.set(id, user);
+  usersByEmail.set(email, id);
+  res.json({ ok: true, user: publicUser(user), token: user.sessionId });
+});
+
+app.post('/api/auth/login', (req, res) => {
+  const email = normalizeEmail(req.body?.email);
+  const passwordHash = hashPassword(req.body?.password);
+  const id = usersByEmail.get(email);
+  const user = id ? users.get(id) : null;
+  if (!user || user.passwordHash !== passwordHash) return res.status(401).json({ ok: false, error: 'Invalid email or password.' });
+  user.sessionId = randomUUID();
+  res.json({ ok: true, user: publicUser(user), token: user.sessionId });
+});
+
+app.get('/api/auth/me', requireUser, (req, res) => {
+  res.json({ ok: true, user: publicUser(req.user) });
+});
+
+app.get('/api/admin/overview', requireAdmin, (_req, res) => {
+  const roomList = [...rooms.values()].map((room) => ({
+    code: room.code,
+    status: room.status,
+    players: room.players.size,
+    alive: getLivePlayers(room).length,
+    phase: room.game?.phase || 'waiting',
+    day: room.game?.day || 0,
+    createdAt: room.createdAt,
+  }));
+  res.json({
+    ok: true,
+    stats: {
+      users: users.size,
+      rooms: rooms.size,
+      activeRooms: roomList.filter((room) => room.status === 'active').length,
+      waitingRooms: roomList.filter((room) => room.status === 'waiting').length,
+      finishedRooms: roomList.filter((room) => room.status === 'finished').length,
+    },
+    rooms: roomList,
+    users: [...users.values()].map(publicUser),
+  });
+});
+
+app.post('/api/admin/rooms/:code/end', requireAdmin, (req, res) => {
+  const room = rooms.get(String(req.params.code || '').toUpperCase());
+  if (!room) return res.status(404).json({ ok: false, error: 'Room not found.' });
+  clearPhaseTimer(room);
+  room.status = 'finished';
+  if (room.game) {
+    room.game.phase = PHASES.GAME_OVER;
+    room.game.winner = 'Admin Ended';
+    room.game.phaseEndsAt = null;
+  }
+  systemMessage(room, `Admin ${req.user.displayName} ended the match.`);
+  emitRoom(room);
+  res.json({ ok: true });
+});
+
 io.on('connection', (socket) => {
-  const sessionId = String(socket.handshake.auth?.sessionId || randomUUID());
-  socket.emit('session', { sessionId });
+  const sessionId = String(socket.handshake.auth?.sessionId || socket.handshake.auth?.token || randomUUID());
+  const authedUser = [...users.values()].find((user) => user.sessionId === sessionId);
+  socket.emit('session', { sessionId, user: publicUser(authedUser) });
 
   socket.on('room:create', (payload = {}, ack) => {
     const code = makeRoomCode();
-    const player = makePlayer({ sessionId, name: payload.name, host: true });
+    const player = makePlayer({ sessionId, name: payload.name || authedUser?.displayName, host: true });
     player.socketId = socket.id;
     player.connected = true;
 
@@ -539,7 +663,7 @@ io.on('connection', (socket) => {
     if (!player) {
       if (room.players.size >= room.settings.maxPlayers) return ackError(ack, 'Room is full.');
       if (room.status !== 'waiting' && !room.settings.allowSpectators) return ackError(ack, 'This match is already in progress.');
-      player = makePlayer({ sessionId, name: payload.name });
+      player = makePlayer({ sessionId, name: payload.name || authedUser?.displayName });
       if (room.status !== 'waiting') {
         player.alive = false;
         player.ready = false;
@@ -548,7 +672,7 @@ io.on('connection', (socket) => {
       systemMessage(room, room.status === 'waiting' ? `${player.name} joined the room.` : `${player.name} joined as a spectator.`);
     }
 
-    player.name = cleanName(payload.name) || player.name;
+    player.name = cleanName(payload.name) || authedUser?.displayName || player.name;
     player.socketId = socket.id;
     player.connected = true;
     socket.join(code);
@@ -595,6 +719,10 @@ io.on('connection', (socket) => {
     if (room.status !== 'waiting') return ackError(ack, 'Game has already started.');
     if (room.players.size < 4) return ackError(ack, 'At least 4 players are required. Add demo players to test solo.');
     assignRoles(room);
+    if (authedUser) {
+      authedUser.stats.matches += 1;
+      authedUser.stats.gamesHosted += 1;
+    }
     room.status = 'active';
     room.game = createGame();
     systemMessage(room, 'Roles have been assigned. The match has started.');

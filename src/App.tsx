@@ -1,725 +1,575 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { io, type Socket } from 'socket.io-client';
 
-type AppScreen =
-  | 'splash'
-  | 'welcome'
-  | 'auth'
-  | 'home'
-  | 'createRoom'
-  | 'joinRoom'
-  | 'lobby'
-  | 'roleReveal'
-  | 'dayDiscussion'
-  | 'playerProfile'
-  | 'vote'
-  | 'voteResult'
-  | 'nightIntro'
-  | 'mafiaAction'
-  | 'detectiveAction'
-  | 'doctorAction'
-  | 'citizenNight'
-  | 'deadChat'
-  | 'nightResult'
-  | 'gameOver'
-  | 'hostControls'
-  | 'roomSettings'
-  | 'matchHistory'
-  | 'rules'
-  | 'profile'
-  | 'notifications'
-  | 'reconnect'
-  | 'emptyState';
+type Page = 'onboarding' | 'auth' | 'home' | 'create' | 'join' | 'lobby' | 'game' | 'admin' | 'rules' | 'profile';
+type AuthMode = 'login' | 'register';
+type Role = 'Mafia' | 'Citizen' | 'Detective' | 'Doctor';
+type Phase = 'roleReveal' | 'dayDiscussion' | 'voting' | 'voteResult' | 'nightActions' | 'nightResult' | 'gameOver';
 
-type PlayerRole = 'Mafia' | 'Citizen' | 'Detective' | 'Doctor';
+type User = {
+  id: string;
+  sessionId: string;
+  email: string;
+  displayName: string;
+  role: 'admin' | 'player';
+  avatar: string;
+  stats: { wins: number; matches: number; gamesHosted: number };
+};
 
 type Player = {
   id: string;
   name: string;
-  role: PlayerRole;
-  avatar: string;
   color: string;
-  status: 'ready' | 'waiting' | 'alive' | 'eliminated' | 'offline';
-  suspicion: number;
-  votes: number;
+  host: boolean;
+  bot: boolean;
+  ready: boolean;
+  connected: boolean;
+  alive: boolean;
+  role: Role | null;
+  team: 'Mafia' | 'Citizens' | null;
 };
 
-const screens: { id: AppScreen; label: string; group: string }[] = [
-  { id: 'splash', label: 'Splash', group: 'Entry' },
-  { id: 'welcome', label: 'Welcome', group: 'Entry' },
-  { id: 'auth', label: 'Login / Guest', group: 'Entry' },
-  { id: 'home', label: 'Home Dashboard', group: 'Entry' },
-  { id: 'createRoom', label: 'Create Room', group: 'Room' },
-  { id: 'joinRoom', label: 'Join Room', group: 'Room' },
-  { id: 'lobby', label: 'Lobby', group: 'Room' },
-  { id: 'roomSettings', label: 'Room Settings', group: 'Room' },
-  { id: 'roleReveal', label: 'Role Reveal', group: 'Game' },
-  { id: 'dayDiscussion', label: 'Day Discussion', group: 'Game' },
-  { id: 'playerProfile', label: 'Player Profile Sheet', group: 'Game' },
-  { id: 'vote', label: 'Vote', group: 'Game' },
-  { id: 'voteResult', label: 'Vote Result', group: 'Game' },
-  { id: 'nightIntro', label: 'Night Intro', group: 'Night' },
-  { id: 'mafiaAction', label: 'Mafia Action', group: 'Night' },
-  { id: 'detectiveAction', label: 'Detective Action', group: 'Night' },
-  { id: 'doctorAction', label: 'Doctor Action', group: 'Night' },
-  { id: 'citizenNight', label: 'Citizen Night', group: 'Night' },
-  { id: 'deadChat', label: 'Dead Chat', group: 'Night' },
-  { id: 'nightResult', label: 'Night Result', group: 'Results' },
-  { id: 'gameOver', label: 'Game Over', group: 'Results' },
-  { id: 'hostControls', label: 'Host Controls', group: 'Admin' },
-  { id: 'matchHistory', label: 'Match History', group: 'Account' },
-  { id: 'rules', label: 'Rules', group: 'Account' },
-  { id: 'profile', label: 'Profile', group: 'Account' },
-  { id: 'notifications', label: 'Notifications', group: 'System' },
-  { id: 'reconnect', label: 'Reconnect', group: 'System' },
-  { id: 'emptyState', label: 'Empty State', group: 'System' },
-];
+type Message = {
+  id: string;
+  channel: 'lobby' | 'day' | 'mafia' | 'dead' | 'system';
+  senderName: string;
+  body: string;
+  createdAt: number;
+};
 
-const players: Player[] = [
-  { id: 'you', name: 'You', role: 'Mafia', avatar: 'M', color: '#c4123d', status: 'alive', suspicion: 18, votes: 0 },
-  { id: 'hana', name: 'Hana', role: 'Mafia', avatar: 'H', color: '#8b1731', status: 'alive', suspicion: 29, votes: 1 },
-  { id: 'minseo', name: 'Minseo', role: 'Citizen', avatar: 'M', color: '#37456d', status: 'alive', suspicion: 72, votes: 4 },
-  { id: 'jisoo', name: 'Jisoo', role: 'Doctor', avatar: 'J', color: '#315f4d', status: 'alive', suspicion: 43, votes: 2 },
-  { id: 'dae', name: 'Dae', role: 'Detective', avatar: 'D', color: '#2b5d90', status: 'waiting', suspicion: 31, votes: 0 },
-  { id: 'yuri', name: 'Yuri', role: 'Citizen', avatar: 'Y', color: '#5a4469', status: 'alive', suspicion: 56, votes: 1 },
-  { id: 'jun', name: 'Jun', role: 'Citizen', avatar: 'J', color: '#6d4c34', status: 'offline', suspicion: 24, votes: 0 },
-  { id: 'sora', name: 'Sora', role: 'Citizen', avatar: 'S', color: '#494e62', status: 'eliminated', suspicion: 39, votes: 0 },
-];
+type RoomSettings = {
+  maxPlayers: number;
+  daySeconds: number;
+  votingSeconds: number;
+  nightSeconds: number;
+  anonymousVotes: boolean;
+  revealEliminatedRoles: boolean;
+  allowSpectators: boolean;
+};
 
-const groupedScreens = screens.reduce<Record<string, typeof screens>>((acc, screen) => {
-  acc[screen.group] ||= [];
-  acc[screen.group].push(screen);
-  return acc;
-}, {});
+type RoomState = {
+  room: {
+    code: string;
+    status: 'waiting' | 'active' | 'finished';
+    hostId: string;
+    settings: RoomSettings;
+    createdAt: number;
+  };
+  me: Player | null;
+  players: Player[];
+  game: null | {
+    phase: Phase;
+    day: number;
+    phaseEndsAt: number | null;
+    winner: string | null;
+    lastResult: null | {
+      type: 'vote' | 'night';
+      day: number;
+      eliminatedId?: string | null;
+      eliminatedName?: string | null;
+      eliminatedRole?: Role | null;
+      protectedName?: string | null;
+      summary: string;
+      votesCast?: number;
+    };
+    votesCast: number;
+    aliveCount: number;
+    myVote: string | null;
+    myAction: null | {
+      type: 'mafia' | 'doctor' | 'detective';
+      targetId: string | null;
+      result?: { targetId: string; targetName: string; alignment: 'Suspicious' | 'Not Suspicious' } | null;
+    };
+  };
+  messages: Message[];
+};
 
-function getScreenIndex(screen: AppScreen) {
-  return screens.findIndex((item) => item.id === screen);
+type Ack = { ok: boolean; error?: string; code?: string; playerId?: string };
+
+type AdminOverview = {
+  stats: { users: number; rooms: number; activeRooms: number; waitingRooms: number; finishedRooms: number };
+  rooms: { code: string; status: string; players: number; alive: number; phase: string; day: number; createdAt: number }[];
+  users: User[];
+};
+
+const TOKEN_KEY = 'midnight-vote-token';
+const USER_KEY = 'midnight-vote-user';
+const GUEST_SESSION_KEY = 'midnight-vote-guest-session';
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || undefined;
+
+const defaultSettings: RoomSettings = {
+  maxPlayers: 12,
+  daySeconds: 90,
+  votingSeconds: 45,
+  nightSeconds: 60,
+  anonymousVotes: true,
+  revealEliminatedRoles: false,
+  allowSpectators: true,
+};
+
+function getGuestSession() {
+  const existing = localStorage.getItem(GUEST_SESSION_KEY);
+  if (existing) return existing;
+  const created = crypto.randomUUID?.() || Math.random().toString(36).slice(2);
+  localStorage.setItem(GUEST_SESSION_KEY, created);
+  return created;
+}
+
+function readStoredUser() {
+  try {
+    const user = localStorage.getItem(USER_KEY);
+    return user ? (JSON.parse(user) as User) : null;
+  } catch {
+    return null;
+  }
+}
+
+function formatTime(seconds: number) {
+  const min = Math.floor(seconds / 60).toString().padStart(2, '0');
+  const sec = (seconds % 60).toString().padStart(2, '0');
+  return `${min}:${sec}`;
+}
+
+function phaseTitle(phase?: Phase) {
+  const titles: Record<Phase, string> = {
+    roleReveal: 'Role Reveal',
+    dayDiscussion: 'Day Discussion',
+    voting: 'Vote Now',
+    voteResult: 'Vote Result',
+    nightActions: 'Night Actions',
+    nightResult: 'Sunrise Report',
+    gameOver: 'Game Over',
+  };
+  return phase ? titles[phase] : 'Lobby';
+}
+
+async function api<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
+  const response = await fetch(path, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  const data = await response.json();
+  if (!response.ok || data.ok === false) throw new Error(data.error || 'Request failed.');
+  return data as T;
 }
 
 export default function App() {
-  const [activeScreen, setActiveScreen] = useState<AppScreen>('splash');
-  const [showAllScreens, setShowAllScreens] = useState(false);
-  const activeIndex = getScreenIndex(activeScreen);
-  const screenMeta = screens[activeIndex];
+  const [page, setPage] = useState<Page>('onboarding');
+  const [authMode, setAuthMode] = useState<AuthMode>('register');
+  const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) || '');
+  const [user, setUser] = useState<User | null>(() => readStoredUser());
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const [connected, setConnected] = useState(false);
+  const [roomState, setRoomState] = useState<RoomState | null>(null);
+  const [clock, setClock] = useState(Date.now());
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const next = () => setActiveScreen(screens[Math.min(activeIndex + 1, screens.length - 1)].id);
-  const prev = () => setActiveScreen(screens[Math.max(activeIndex - 1, 0)].id);
+  const authSession = token || getGuestSession();
+
+  useEffect(() => {
+    const client = io(SOCKET_URL, { auth: { sessionId: authSession, token: authSession } });
+    setSocket(client);
+    client.on('connect', () => setConnected(true));
+    client.on('disconnect', () => setConnected(false));
+    client.on('room:update', (state: RoomState) => {
+      setRoomState(state);
+      setPage(state.room.status === 'waiting' ? 'lobby' : 'game');
+    });
+    client.on('session', ({ sessionId }: { sessionId: string }) => {
+      if (!token) localStorage.setItem(GUEST_SESSION_KEY, sessionId);
+    });
+    return () => {
+      client.disconnect();
+    };
+  }, [authSession, token]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const secondsLeft = useMemo(() => {
+    const endsAt = roomState?.game?.phaseEndsAt;
+    return endsAt ? Math.max(0, Math.ceil((endsAt - clock) / 1000)) : 0;
+  }, [roomState?.game?.phaseEndsAt, clock]);
+
+  const showToast = (text: string, type: 'success' | 'error' = 'success') => {
+    setToast({ text, type });
+    window.setTimeout(() => setToast(null), 3200);
+  };
+
+  const emitAck = (event: string, payload: Record<string, unknown> = {}) => {
+    if (!socket) return Promise.resolve({ ok: false, error: 'Socket is not connected.' });
+    return new Promise<Ack>((resolve) => {
+      socket.emit(event, payload, (ack: Ack) => {
+        if (!ack?.ok) showToast(ack?.error || 'Something went wrong.', 'error');
+        else if (!['room:create', 'room:join'].includes(event)) showToast('Action confirmed.');
+        resolve(ack);
+      });
+    });
+  };
+
+  const saveAuth = (nextUser: User, nextToken: string) => {
+    setUser(nextUser);
+    setToken(nextToken);
+    localStorage.setItem(TOKEN_KEY, nextToken);
+    localStorage.setItem(USER_KEY, JSON.stringify(nextUser));
+  };
+
+  const logout = () => {
+    setUser(null);
+    setToken('');
+    setRoomState(null);
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+    setPage('onboarding');
+  };
 
   return (
-    <main className="design-workbench">
-      <aside className="design-sidebar">
-        <div className="side-brand">
-          <Logo />
-          <div>
-            <p className="eyebrow">Full front-end preview</p>
-            <h1>Midnight Vote</h1>
-          </div>
-        </div>
-        <p className="side-copy">
-          Every major page of the app is now visible from this design navigator. Select any screen to preview the full mobile UI.
-        </p>
-        <div className="screen-count-card">
-          <span>Total screens</span>
-          <strong>{screens.length}</strong>
-          <em>{screenMeta.group} / {screenMeta.label}</em>
-        </div>
-        <nav className="screen-list" aria-label="App screens">
-          {Object.entries(groupedScreens).map(([group, items]) => (
-            <div key={group} className="screen-group">
-              <p>{group}</p>
-              {items.map((item, index) => (
-                <button key={item.id} className={activeScreen === item.id ? 'active' : ''} onClick={() => setActiveScreen(item.id)}>
-                  <span>{String(screens.findIndex((screen) => screen.id === item.id) + 1).padStart(2, '0')}</span>
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          ))}
+    <main className="app-root">
+      <CinematicBackdrop />
+      <aside className="desktop-panel">
+        <Logo />
+        <p className="eyebrow">Full-stack cinematic MVP</p>
+        <h1>Midnight Vote</h1>
+        <p>A functional social deduction web app with auth, realtime rooms, game phases, admin tools, and motion design.</p>
+        <div className="desktop-status"><span>Socket</span><strong>{connected ? 'Live' : 'Offline'}</strong></div>
+        <nav>
+          <button onClick={() => setPage('home')}>Home</button>
+          <button onClick={() => setPage('create')}>Create Room</button>
+          <button onClick={() => setPage('join')}>Join Room</button>
+          <button onClick={() => setPage('rules')}>Rules</button>
+          {user?.role === 'admin' && <button onClick={() => setPage('admin')}>Admin Panel</button>}
         </nav>
       </aside>
 
-      <section className="preview-stage">
-        <div className="stage-header">
-          <div>
-            <p className="eyebrow">{screenMeta.group}</p>
-            <h2>{screenMeta.label}</h2>
-          </div>
-          <div className="stage-actions">
-            <button onClick={prev} disabled={activeIndex === 0}>Previous</button>
-            <button onClick={() => setShowAllScreens(true)}>All Screens</button>
-            <button onClick={next} disabled={activeIndex === screens.length - 1}>Next</button>
-          </div>
-        </div>
-
-        <div className="phone-frame">
-          <div className="phone-glow" />
-          <div className="phone-screen">
-            <StatusBar />
-            <button className="floating-map" onClick={() => setShowAllScreens(true)}>Map</button>
-            <ScreenRenderer screen={activeScreen} setScreen={setActiveScreen} />
-          </div>
+      <section className="phone-wrap">
+        <div className="phone-glow" />
+        <div className="phone-screen">
+          <StatusBar />
+          <div className={`live-pill ${connected ? 'online' : ''}`}>{connected ? 'Live' : 'Offline'}</div>
+          <ScreenTransitionKey page={page} phase={roomState?.game?.phase}>
+            {page === 'onboarding' && <Onboarding onStart={() => setPage(user ? 'home' : 'auth')} onRules={() => setPage('rules')} />}
+            {page === 'auth' && <AuthScreen mode={authMode} setMode={setAuthMode} saveAuth={saveAuth} showToast={showToast} onContinue={() => setPage('home')} />}
+            {page === 'home' && <HomeScreen user={user} onAuth={() => setPage('auth')} onCreate={() => setPage('create')} onJoin={() => setPage('join')} onAdmin={() => setPage('admin')} onProfile={() => setPage('profile')} />}
+            {page === 'create' && <CreateRoomScreen socketReady={connected} emitAck={emitAck} displayName={user?.displayName || 'Guest'} />}
+            {page === 'join' && <JoinRoomScreen emitAck={emitAck} displayName={user?.displayName || 'Guest'} />}
+            {page === 'lobby' && roomState && <LobbyScreen state={roomState} emitAck={emitAck} />}
+            {page === 'game' && roomState && <GameScreen state={roomState} secondsLeft={secondsLeft} emitAck={emitAck} />}
+            {page === 'admin' && <AdminPanel token={token} user={user} showToast={showToast} />}
+            {page === 'rules' && <RulesScreen onBack={() => setPage(user ? 'home' : 'onboarding')} />}
+            {page === 'profile' && <ProfileScreen user={user} logout={logout} onBack={() => setPage('home')} />}
+          </ScreenTransitionKey>
+          {toast && <div className={`toast ${toast.type}`}>{toast.text}</div>}
         </div>
       </section>
-
-      {showAllScreens && <AllScreensOverlay active={activeScreen} onClose={() => setShowAllScreens(false)} onSelect={(screen) => { setActiveScreen(screen); setShowAllScreens(false); }} />}
     </main>
   );
 }
 
-function ScreenRenderer({ screen, setScreen }: { screen: AppScreen; setScreen: (screen: AppScreen) => void }) {
-  const props = { setScreen };
-  switch (screen) {
-    case 'splash': return <SplashScreen {...props} />;
-    case 'welcome': return <WelcomeScreen {...props} />;
-    case 'auth': return <AuthScreen {...props} />;
-    case 'home': return <HomeScreen {...props} />;
-    case 'createRoom': return <CreateRoomScreen {...props} />;
-    case 'joinRoom': return <JoinRoomScreen {...props} />;
-    case 'lobby': return <LobbyScreen {...props} />;
-    case 'roleReveal': return <RoleRevealScreen {...props} />;
-    case 'dayDiscussion': return <DayDiscussionScreen {...props} />;
-    case 'playerProfile': return <PlayerProfileSheet {...props} />;
-    case 'vote': return <VoteScreen {...props} />;
-    case 'voteResult': return <VoteResultScreen {...props} />;
-    case 'nightIntro': return <NightIntroScreen {...props} />;
-    case 'mafiaAction': return <MafiaActionScreen {...props} />;
-    case 'detectiveAction': return <DetectiveActionScreen {...props} />;
-    case 'doctorAction': return <DoctorActionScreen {...props} />;
-    case 'citizenNight': return <CitizenNightScreen {...props} />;
-    case 'deadChat': return <DeadChatScreen {...props} />;
-    case 'nightResult': return <NightResultScreen {...props} />;
-    case 'gameOver': return <GameOverScreen {...props} />;
-    case 'hostControls': return <HostControlsScreen {...props} />;
-    case 'roomSettings': return <RoomSettingsScreen {...props} />;
-    case 'matchHistory': return <MatchHistoryScreen {...props} />;
-    case 'rules': return <RulesScreen {...props} />;
-    case 'profile': return <ProfileScreen {...props} />;
-    case 'notifications': return <NotificationsScreen {...props} />;
-    case 'reconnect': return <ReconnectScreen {...props} />;
-    case 'emptyState': return <EmptyStateScreen {...props} />;
-  }
+function ScreenTransitionKey({ children, page, phase }: { children: ReactNode; page: Page; phase?: Phase }) {
+  return <div key={`${page}-${phase || 'none'}`} className="screen-motion">{children}</div>;
 }
 
-function SplashScreen({ setScreen }: ScreenProps) {
+function Onboarding({ onStart, onRules }: { onStart: () => void; onRules: () => void }) {
   return (
-    <ScreenShell className="splash-screen" centered>
-      <div className="moon-orbit large"><Logo /></div>
-      <p className="eyebrow center">A fictional social deduction game</p>
-      <h1 className="app-title">Midnight Vote</h1>
-      <p className="muted center">When night falls, every choice becomes evidence.</p>
-      <div className="loading-bar"><i /></div>
-      <button className="primary" onClick={() => setScreen('welcome')}>Enter Prototype</button>
-    </ScreenShell>
+    <Screen centered className="onboarding">
+      <div className="cinematic-bars"><i /><i /></div>
+      <div className="moon-orbit"><Logo /></div>
+      <p className="eyebrow center">Realtime mystery party game</p>
+      <h2 className="hero-title">When night falls, choose wisely.</h2>
+      <p className="muted center">Create rooms, reveal secret roles, vote by day, act by night, and survive until one team wins.</p>
+      <div className="motion-cards"><span>Role</span><span>Vote</span><span>Night</span></div>
+      <button className="primary" onClick={onStart}>Start Game</button>
+      <button className="secondary" onClick={onRules}>How It Works</button>
+    </Screen>
   );
 }
 
-function WelcomeScreen({ setScreen }: ScreenProps) {
-  return (
-    <ScreenShell>
-      <div className="hero-card tall">
-        <Logo />
-        <p className="eyebrow">Private room mystery</p>
-        <h2>Play the vote. Hide your role. Survive the night.</h2>
-        <p>Invite friends into a dark realtime party game where every day brings accusations and every night brings secret actions.</p>
-      </div>
-      <div className="feature-grid">
-        <MiniFeature icon="☾" title="Secret roles" text="Mafia, Doctor, Detective, Citizens" />
-        <MiniFeature icon="⌛" title="Live phases" text="Server-timed day and night rounds" />
-        <MiniFeature icon="◉" title="Private rooms" text="Join by link or room code" />
-      </div>
-      <button className="primary" onClick={() => setScreen('auth')}>Get Started</button>
-      <button className="secondary" onClick={() => setScreen('rules')}>View Rules</button>
-    </ScreenShell>
-  );
-}
+function AuthScreen({ mode, setMode, saveAuth, showToast, onContinue }: { mode: AuthMode; setMode: (mode: AuthMode) => void; saveAuth: (user: User, token: string) => void; showToast: (text: string, type?: 'success' | 'error') => void; onContinue: () => void }) {
+  const [displayName, setDisplayName] = useState('Macaulay');
+  const [email, setEmail] = useState(mode === 'register' ? 'admin@midnight.vote' : '');
+  const [password, setPassword] = useState('midnight');
+  const [loading, setLoading] = useState(false);
 
-function AuthScreen({ setScreen }: ScreenProps) {
+  const submit = async () => {
+    try {
+      setLoading(true);
+      const data = await api<{ ok: true; user: User; token: string }>(`/api/auth/${mode}`, {
+        method: 'POST',
+        body: JSON.stringify({ displayName, email, password }),
+      });
+      saveAuth(data.user, data.token);
+      showToast(mode === 'register' ? 'Account created.' : 'Logged in.');
+      onContinue();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Auth failed.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <ScreenShell>
-      <Header title="Enter Game" kicker="Guest access" />
-      <div className="form-card deluxe">
-        <label>Display name<input defaultValue="Macaulay" /></label>
-        <label>Avatar style<select defaultValue="shadow"><option value="shadow">Shadow</option><option value="moon">Moon</option><option value="signal">Signal</option></select></label>
-        <button className="primary" onClick={() => setScreen('home')}>Continue as Guest</button>
-        <button className="secondary">Sign in Later</button>
+    <Screen>
+      <Header title={mode === 'register' ? 'Create Account' : 'Welcome Back'} kicker="Secure player profile" />
+      <div className="auth-switch"><button className={mode === 'register' ? 'active' : ''} onClick={() => setMode('register')}>Create</button><button className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>Login</button></div>
+      <div className="form-card">
+        {mode === 'register' && <label>Display name<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} /></label>}
+        <label>Email<input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" /></label>
+        <label>Password<input value={password} onChange={(event) => setPassword(event.target.value)} type="password" /></label>
+        <button className="primary" onClick={submit} disabled={loading}>{loading ? 'Please wait...' : mode === 'register' ? 'Create Account' : 'Login'}</button>
       </div>
       <SafetyCard />
-    </ScreenShell>
+      <p className="hint">Tip: the first created account becomes admin. Use admin@midnight.vote to demo admin access.</p>
+    </Screen>
   );
 }
 
-function HomeScreen({ setScreen }: ScreenProps) {
+function HomeScreen({ user, onAuth, onCreate, onJoin, onAdmin, onProfile }: { user: User | null; onAuth: () => void; onCreate: () => void; onJoin: () => void; onAdmin: () => void; onProfile: () => void }) {
   return (
-    <ScreenShell>
-      <Header title="Midnight Hub" kicker="Tonight's rooms" right="LVL 4" />
-      <div className="profile-strip">
-        <Avatar name="Macaulay" color="#c4123d" />
-        <div><strong>Macaulay</strong><span>7 wins • 18 matches • 62% deception rate</span></div>
+    <Screen>
+      <Header title="Midnight Hub" kicker={user ? `Signed in as ${user.displayName}` : 'Guest mode'} right={user?.role === 'admin' ? 'ADMIN' : 'LIVE'} />
+      <button className="profile-strip" onClick={user ? onProfile : onAuth}>
+        <Avatar name={user?.displayName || 'Guest'} color="#c4123d" />
+        <div><strong>{user?.displayName || 'Guest Player'}</strong><span>{user ? `${user.stats.matches} matches • ${user.stats.gamesHosted} hosted` : 'Create an account to save progress'}</span></div>
+      </button>
+      <div className="action-grid">
+        <button onClick={onCreate}><span>＋</span><strong>Create Room</strong><em>Host a match</em></button>
+        <button onClick={onJoin}><span>#</span><strong>Join Room</strong><em>Use a code</em></button>
+        <button><span>▶</span><strong>Quick Demo</strong><em>Add bots and test</em></button>
+        <button onClick={onAdmin} disabled={user?.role !== 'admin'}><span>◎</span><strong>Admin Panel</strong><em>Monitor rooms</em></button>
       </div>
-      <div className="home-actions">
-        <button onClick={() => setScreen('createRoom')}><span>＋</span><strong>Create Room</strong><em>Host your own match</em></button>
-        <button onClick={() => setScreen('joinRoom')}><span>#</span><strong>Join Room</strong><em>Use invite code</em></button>
-      </div>
-      <SectionTitle title="Recent rooms" value="3 active" />
-      <RoomPreview name="After Class" code="R7K2Q" players="8/12" status="Lobby open" onClick={() => setScreen('lobby')} />
-      <RoomPreview name="Midnight Club" code="M9X4A" players="11/12" status="Voting now" onClick={() => setScreen('dayDiscussion')} />
-      <button className="secondary" onClick={() => setScreen('matchHistory')}>View Match History</button>
-    </ScreenShell>
+      <SectionTitle title="Cinematic flow" value="full-stack" />
+      <Timeline />
+      {!user && <button className="primary" onClick={onAuth}>Create Account / Login</button>}
+    </Screen>
   );
 }
 
-function CreateRoomScreen({ setScreen }: ScreenProps) {
+function CreateRoomScreen({ socketReady, emitAck, displayName }: { socketReady: boolean; emitAck: (event: string, payload?: Record<string, unknown>) => Promise<Ack>; displayName: string }) {
+  const [settings, setSettings] = useState<RoomSettings>(defaultSettings);
+  const [roomName, setRoomName] = useState('After Class');
+  const createRoom = async () => {
+    await emitAck('room:create', { name: displayName, roomName, settings });
+  };
   return (
-    <ScreenShell>
-      <Header title="Create Room" kicker="Host setup" />
-      <div className="form-card deluxe">
-        <label>Room name<input defaultValue="After Class" /></label>
-        <label>Theme<select defaultValue="classic"><option value="classic">Classic Crimson</option><option value="school">School Mystery</option><option value="eclipse">Eclipse</option></select></label>
+    <Screen>
+      <Header title="Create Room" kicker="Host setup" right={socketReady ? 'Ready' : 'Wait'} />
+      <div className="form-card"><label>Room name<input value={roomName} onChange={(event) => setRoomName(event.target.value)} /></label></div>
+      <div className="settings-card">
+        <Stepper label="Max players" value={settings.maxPlayers} min={4} max={20} onChange={(value) => setSettings({ ...settings, maxPlayers: value })} />
+        <Stepper label="Day timer" value={settings.daySeconds} min={30} max={300} step={30} suffix="s" onChange={(value) => setSettings({ ...settings, daySeconds: value })} />
+        <Stepper label="Vote timer" value={settings.votingSeconds} min={20} max={120} step={5} suffix="s" onChange={(value) => setSettings({ ...settings, votingSeconds: value })} />
+        <Stepper label="Night timer" value={settings.nightSeconds} min={30} max={180} step={15} suffix="s" onChange={(value) => setSettings({ ...settings, nightSeconds: value })} />
+        <Toggle label="Anonymous votes" active={settings.anonymousVotes} onClick={() => setSettings({ ...settings, anonymousVotes: !settings.anonymousVotes })} />
+        <Toggle label="Reveal eliminated roles" active={settings.revealEliminatedRoles} onClick={() => setSettings({ ...settings, revealEliminatedRoles: !settings.revealEliminatedRoles })} />
+        <Toggle label="Allow spectators" active={settings.allowSpectators} onClick={() => setSettings({ ...settings, allowSpectators: !settings.allowSpectators })} />
       </div>
-      <div className="setting-panel">
-        <NumberRow label="Max players" value="12" />
-        <NumberRow label="Mafia" value="2" danger />
-        <NumberRow label="Detective" value="1" blue />
-        <NumberRow label="Doctor" value="1" green />
-        <SliderRow label="Day discussion" value="05:00" percent={78} />
-        <SliderRow label="Night actions" value="02:00" percent={42} />
-        <ToggleRow label="Anonymous votes" active />
-        <ToggleRow label="Reveal eliminated roles" />
-      </div>
-      <button className="primary" onClick={() => setScreen('lobby')}>Generate Room Code</button>
-    </ScreenShell>
+      <button className="primary" onClick={createRoom}>Generate Room Code</button>
+    </Screen>
   );
 }
 
-function JoinRoomScreen({ setScreen }: ScreenProps) {
+function JoinRoomScreen({ emitAck, displayName }: { emitAck: (event: string, payload?: Record<string, unknown>) => Promise<Ack>; displayName: string }) {
+  const [code, setCode] = useState(() => new URLSearchParams(location.search).get('room')?.toUpperCase() || '');
   return (
-    <ScreenShell>
+    <Screen centered>
       <Header title="Join Room" kicker="Private invite" />
-      <div className="join-code-card">
-        <span>Room Code</span>
-        <strong>R7K2Q</strong>
-        <p>Ask your host for the five-character code or open an invite link.</p>
-      </div>
-      <div className="code-keypad">
-        {'R7K2Q'.split('').map((char) => <button key={char}>{char}</button>)}
-      </div>
-      <button className="primary" onClick={() => setScreen('lobby')}>Join Waiting Lobby</button>
-      <button className="secondary" onClick={() => setScreen('home')}>Back Home</button>
-    </ScreenShell>
+      <div className="join-card"><span>Room Code</span><input value={code} onChange={(event) => setCode(event.target.value.toUpperCase())} placeholder="R7K2Q" /><p>Paste a code or open an invite link.</p></div>
+      <button className="primary" onClick={() => emitAck('room:join', { code, name: displayName })}>Join Waiting Lobby</button>
+    </Screen>
   );
 }
 
-function LobbyScreen({ setScreen }: ScreenProps) {
+function LobbyScreen({ state, emitAck }: { state: RoomState; emitAck: (event: string, payload?: Record<string, unknown>) => Promise<Ack> }) {
+  const invite = `${location.origin}${location.pathname}?room=${state.room.code}`;
+  const readyCount = state.players.filter((player) => player.ready).length;
   return (
-    <ScreenShell>
-      <Header title="Waiting Lobby" kicker="Room code" right="R7K2Q" />
-      <div className="invite-card wide">
-        <div><span>Invite link</span><strong>midnight.vote/R7K2Q</strong></div>
-        <button>Copy</button>
-      </div>
-      <div className="lobby-progress"><span>6 of 8 ready</span><i><b style={{ width: '75%' }} /></i></div>
-      <SectionTitle title="Players" value="8/12" />
-      <div className="player-list compact-list">
-        {players.map((player) => <PlayerRow key={player.id} player={player} lobby />)}
-      </div>
-      <ChatBox channel="Lobby chat" />
-      <div className="dual-actions"><button className="secondary" onClick={() => setScreen('roomSettings')}>Settings</button><button className="primary" onClick={() => setScreen('roleReveal')}>Start Game</button></div>
-    </ScreenShell>
+    <Screen>
+      <Header title="Waiting Lobby" kicker="Room code" right={state.room.code} />
+      <div className="invite-card"><div><span>Invite link</span><strong>{invite.replace(/^https?:\/\//, '')}</strong></div><button onClick={() => navigator.clipboard?.writeText(invite)}>Copy</button></div>
+      <div className="progress-card"><span>{readyCount}/{state.players.length} ready</span><i><b style={{ width: `${(readyCount / Math.max(1, state.players.length)) * 100}%` }} /></i></div>
+      <div className="player-list">{state.players.map((player) => <PlayerRow key={player.id} player={player} />)}</div>
+      <ChatPanel state={state} channel="lobby" />
+      <div className="split-buttons"><button className="secondary" onClick={() => emitAck('player:ready', { ready: !state.me?.ready })}>{state.me?.ready ? 'Not Ready' : 'Ready Up'}</button>{state.me?.host && <button className="secondary" onClick={() => emitAck('room:addBot')}>Add Bot</button>}</div>
+      {state.me?.host && <button className="primary sticky" onClick={() => emitAck('game:start')}>Start Game</button>}
+    </Screen>
   );
 }
 
-function RoomSettingsScreen({ setScreen }: ScreenProps) {
+function GameScreen({ state, secondsLeft, emitAck }: { state: RoomState; secondsLeft: number; emitAck: (event: string, payload?: Record<string, unknown>) => Promise<Ack> }) {
+  const phase = state.game?.phase;
+  if (!state.game || !state.me) return null;
+  if (phase === 'roleReveal') return <RoleReveal state={state} secondsLeft={secondsLeft} />;
+  if (phase === 'dayDiscussion') return <DayDiscussion state={state} secondsLeft={secondsLeft} emitAck={emitAck} />;
+  if (phase === 'voting') return <Voting state={state} secondsLeft={secondsLeft} emitAck={emitAck} />;
+  if (phase === 'voteResult') return <ResultPage state={state} secondsLeft={secondsLeft} title="Vote Result" />;
+  if (phase === 'nightActions') return <NightActions state={state} secondsLeft={secondsLeft} emitAck={emitAck} />;
+  if (phase === 'nightResult') return <ResultPage state={state} secondsLeft={secondsLeft} title="Sunrise Report" />;
+  return <GameOver state={state} />;
+}
+
+function RoleReveal({ state, secondsLeft }: { state: RoomState; secondsLeft: number }) {
+  const me = state.me!;
   return (
-    <ScreenShell>
-      <Header title="Room Settings" kicker="Host controls" />
-      <div className="setting-panel spacious">
-        <ToggleRow label="Anonymous votes" active />
-        <ToggleRow label="Allow spectators" active />
-        <ToggleRow label="Dead chat" active />
-        <ToggleRow label="Reveal roles on death" />
-        <NumberRow label="Tie rule" value="Revote" />
-        <NumberRow label="Minimum players" value="6" />
-        <SliderRow label="Day phase" value="05:00" percent={78} />
-        <SliderRow label="Voting phase" value="00:45" percent={34} />
-        <SliderRow label="Night phase" value="02:00" percent={45} />
-      </div>
-      <button className="primary" onClick={() => setScreen('lobby')}>Save Settings</button>
-    </ScreenShell>
+    <Screen centered className="role-page">
+      <Header title="Role Reveal" kicker="Private card" right={formatTime(secondsLeft)} />
+      <div className={`role-card ${me.role?.toLowerCase()}`}><span>{roleIcon(me.role)}</span><p>YOUR ROLE</p><h2>{me.role}</h2><em>{roleCopy(me.role)}</em></div>
+      {me.role === 'Mafia' && <div className="team-card"><span>Mafia Team</span><div>{state.players.filter((p) => p.role === 'Mafia').map((p) => <Avatar key={p.id} name={p.name} color={p.color} />)}</div></div>}
+      <p className="hint center">Day begins automatically after the countdown.</p>
+    </Screen>
   );
 }
 
-function RoleRevealScreen({ setScreen }: ScreenProps) {
+function DayDiscussion({ state, secondsLeft, emitAck }: { state: RoomState; secondsLeft: number; emitAck: (event: string, payload?: Record<string, unknown>) => Promise<Ack> }) {
+  const alive = state.players.filter((player) => player.alive);
   return (
-    <ScreenShell className="role-reveal-page">
-      <Header title="Role Reveal" kicker="Private information" right="00:12" />
-      <div className="role-card mafia">
-        <span>☾</span>
-        <p>YOUR ROLE</p>
-        <h2>MAFIA</h2>
-        <em>At night, choose one player to eliminate.</em>
-      </div>
-      <InfoCard label="Objective" text="Blend in during the day. Control the vote. Outnumber the Citizens." />
-      <div className="team-card"><span>Mafia Team</span><div>{players.filter((p) => p.role === 'Mafia').map((p) => <Avatar key={p.id} name={p.name} color={p.color} />)}</div></div>
-      <button className="primary" onClick={() => setScreen('dayDiscussion')}>I Understand</button>
-    </ScreenShell>
+    <Screen>
+      <Header title={`DAY ${state.game?.day}`} kicker="Discuss and find Mafia" right={formatTime(secondsLeft)} />
+      <PhaseBanner title="Public chat is open" text="Accuse, defend, and track contradictions before voting starts." />
+      <div className="player-grid">{alive.map((player) => <PlayerCard key={player.id} player={player} />)}</div>
+      <ChatPanel state={state} channel="day" />
+      {state.me?.host && <button className="primary sticky" onClick={() => emitAck('host:skipPhase')}>Skip to Vote</button>}
+    </Screen>
   );
 }
 
-function DayDiscussionScreen({ setScreen }: ScreenProps) {
+function Voting({ state, secondsLeft, emitAck }: { state: RoomState; secondsLeft: number; emitAck: (event: string, payload?: Record<string, unknown>) => Promise<Ack> }) {
+  const candidates = state.players.filter((player) => player.alive && player.id !== state.me?.id);
+  const [target, setTarget] = useState(state.game?.myVote || candidates[0]?.id || '');
   return (
-    <ScreenShell>
-      <Header title="DAY 1" kicker="Discuss and investigate" right="04:31" />
-      <PhaseBanner title="Public chat is open" text="Find contradictions. Watch who pushes the vote." />
-      <SectionTitle title="Alive players" value="7 left" />
-      <div className="player-grid">
-        {players.filter((p) => p.status !== 'eliminated').slice(0, 6).map((player) => <PlayerCard key={player.id} player={player} onClick={() => setScreen('playerProfile')} />)}
-      </div>
-      <ChatBox channel="Public discussion" />
-      <button className="primary sticky-button" onClick={() => setScreen('vote')}>Open Vote</button>
-    </ScreenShell>
+    <Screen>
+      <Header title="VOTE NOW" kicker={`${state.game?.votesCast || 0} votes cast`} right={formatTime(secondsLeft)} />
+      <div className="vote-list">{candidates.map((player) => <button key={player.id} className={target === player.id ? 'selected' : ''} onClick={() => setTarget(player.id)}><Avatar name={player.name} color={player.color} /><div><strong>{player.name}</strong><span>{state.room.settings.anonymousVotes ? 'Anonymous vote mode' : 'Public vote mode'}</span></div><em>{state.game?.myVote === player.id ? 'Voted' : target === player.id ? '✓' : '?'}</em></button>)}</div>
+      <div className="bottom-sheet"><span>Confirm vote</span><strong>Vote for {state.players.find((player) => player.id === target)?.name || 'player'}?</strong><button className="primary" onClick={() => emitAck('vote:cast', { targetId: target })}>Confirm Vote</button></div>
+    </Screen>
   );
 }
 
-function PlayerProfileSheet({ setScreen }: ScreenProps) {
-  const player = players[2];
+function NightActions({ state, secondsLeft, emitAck }: { state: RoomState; secondsLeft: number; emitAck: (event: string, payload?: Record<string, unknown>) => Promise<Ack> }) {
+  const me = state.me!;
+  if (!me.alive || me.role === 'Citizen') return <SleepScreen state={state} secondsLeft={secondsLeft} />;
+  const candidates = state.players.filter((player) => player.alive && (me.role !== 'Mafia' || player.role !== 'Mafia') && (me.role !== 'Detective' || player.id !== me.id));
+  const [target, setTarget] = useState(state.game?.myAction?.targetId || candidates[0]?.id || '');
+  const accent = me.role === 'Detective' ? 'blue' : me.role === 'Doctor' ? 'green' : 'red';
   return (
-    <ScreenShell>
-      <Header title="Player Details" kicker="Suspicion profile" />
-      <div className="profile-detail-card">
-        <Avatar name={player.name} color={player.color} large />
-        <h2>{player.name}</h2>
-        <span>Alive • Role hidden</span>
-        <div className="suspicion-ring"><strong>{player.suspicion}%</strong><em>Suspicion</em></div>
-      </div>
-      <div className="setting-panel">
-        <InfoRow label="Votes received" value="4" />
-        <InfoRow label="Last voted for" value="Hana" />
-        <InfoRow label="Chat activity" value="High" />
-        <InfoRow label="Status" value="Online" />
-      </div>
-      <button className="primary" onClick={() => setScreen('vote')}>Vote for Minseo</button>
-      <button className="secondary" onClick={() => setScreen('dayDiscussion')}>Back to Day</button>
-    </ScreenShell>
+    <Screen className={`night-screen ${accent}`}>
+      <Header title={`${me.role} Action`} kicker={`Night ${state.game?.day}`} right={formatTime(secondsLeft)} />
+      <PhaseBanner title={roleNightInstruction(me.role)} text="Choose and confirm before sunrise. You may change your action until the timer ends." />
+      <div className="vote-list">{candidates.map((player) => <button key={player.id} className={target === player.id ? `selected ${accent}` : ''} onClick={() => setTarget(player.id)}><Avatar name={player.name} color={player.color} /><div><strong>{player.name}</strong><span>{target === player.id ? 'Selected' : 'Available'}</span></div><em>{state.game?.myAction?.targetId === player.id ? 'Locked' : target === player.id ? '✓' : ''}</em></button>)}</div>
+      {me.role === 'Mafia' && <ChatPanel state={state} channel="mafia" />}
+      {me.role === 'Detective' && state.game?.myAction?.result && <div className="info-card"><span>Private result</span><strong>{state.game.myAction.result.targetName} appears {state.game.myAction.result.alignment}.</strong></div>}
+      <button className={`primary ${accent === 'blue' ? 'blue-button' : accent === 'green' ? 'green-button' : ''}`} onClick={() => emitAck('night:action', { targetId: target })}>Confirm Action</button>
+    </Screen>
   );
 }
 
-function VoteScreen({ setScreen }: ScreenProps) {
+function SleepScreen({ state, secondsLeft }: { state: RoomState; secondsLeft: number }) {
   return (
-    <ScreenShell>
-      <Header title="VOTE NOW" kicker="Choose one suspect" right="00:46" />
-      <div className="vote-list">
-        {players.filter((p) => p.id !== 'you' && p.status !== 'eliminated').map((player) => (
-          <button key={player.id} className={player.id === 'minseo' ? 'selected' : ''}>
-            <Avatar name={player.name} color={player.color} />
-            <div><strong>{player.name}</strong><span>Votes hidden in anonymous mode</span></div>
-            <em>{player.id === 'minseo' ? '✓' : '?'}</em>
-          </button>
-        ))}
-      </div>
-      <div className="bottom-sheet"><span>Confirm vote</span><strong>Vote for Minseo?</strong><div className="dual-actions"><button className="secondary">Cancel</button><button className="primary" onClick={() => setScreen('voteResult')}>Confirm</button></div></div>
-    </ScreenShell>
-  );
-}
-
-function VoteResultScreen({ setScreen }: ScreenProps) {
-  return (
-    <ScreenShell centered>
-      <Header title="Vote Result" kicker="Server resolved" right="00:08" />
-      <div className="alert-symbol">!</div>
-      <h2 className="result-title">Minseo was eliminated by vote.</h2>
-      <p className="muted center">Their role remains hidden by room settings.</p>
-      <div className="result-stack"><span>8 votes cast</span><span>4 votes against Minseo</span><span>Night begins next</span></div>
-      <button className="primary" onClick={() => setScreen('nightIntro')}>Continue</button>
-    </ScreenShell>
-  );
-}
-
-function NightIntroScreen({ setScreen }: ScreenProps) {
-  return (
-    <ScreenShell className="night-intro" centered>
-      <div className="moon-orbit large"><span className="moon-symbol">☾</span></div>
-      <p className="eyebrow center">Night 1</p>
-      <h2 className="result-title">Night has fallen.</h2>
-      <p className="muted center">Special roles must act before sunrise. Public chat is now closed.</p>
-      <button className="primary" onClick={() => setScreen('mafiaAction')}>Preview Mafia Action</button>
-    </ScreenShell>
-  );
-}
-
-function MafiaActionScreen({ setScreen }: ScreenProps) {
-  return <NightActionLayout title="Mafia Action" kicker="Private Mafia panel" timer="01:22" accent="red" instruction="Choose a target before sunrise." cta="Lock Target" selected="Jisoo" onNext={() => setScreen('detectiveAction')} />;
-}
-
-function DetectiveActionScreen({ setScreen }: ScreenProps) {
-  return <NightActionLayout title="Detective Action" kicker="Private investigation" timer="01:10" accent="blue" instruction="Investigate one player's alignment." cta="Investigate Hana" selected="Hana" onNext={() => setScreen('doctorAction')} result="Hana appears Suspicious." />;
-}
-
-function DoctorActionScreen({ setScreen }: ScreenProps) {
-  return <NightActionLayout title="Doctor Action" kicker="Private protection" timer="01:05" accent="green" instruction="Protect one player from tonight's attack." cta="Confirm Protection" selected="Minseo" onNext={() => setScreen('citizenNight')} result="You cannot protect the same target twice in a row." />;
-}
-
-function CitizenNightScreen({ setScreen }: ScreenProps) {
-  return (
-    <ScreenShell centered>
-      <Header title="Night Falls" kicker="Citizen view" right="01:05" />
+    <Screen centered className="night-sleep">
+      <Header title={state.me?.alive ? 'Night Falls' : 'Dead Chat'} kicker="Waiting for sunrise" right={formatTime(secondsLeft)} />
       <div className="alert-symbol moon">☾</div>
-      <h2 className="result-title">You have no night action.</h2>
-      <p className="muted center">Stay quiet and wait for the sunrise report.</p>
-      <button className="primary" onClick={() => setScreen('nightResult')}>Skip to Sunrise</button>
-    </ScreenShell>
+      <h2 className="result-title">{state.me?.alive ? 'Your role has no night action.' : 'You are eliminated.'}</h2>
+      <p className="muted center">Watch the countdown. The server will resolve the night automatically.</p>
+    </Screen>
   );
 }
 
-function DeadChatScreen({ setScreen }: ScreenProps) {
+function ResultPage({ state, secondsLeft, title }: { state: RoomState; secondsLeft: number; title: string }) {
+  const result = state.game?.lastResult;
   return (
-    <ScreenShell>
-      <Header title="Dead Chat" kicker="Spectator mode" right="Ghost" />
-      <div className="phase-banner ghost"><strong>You are eliminated.</strong><span>You can watch the game, but cannot vote or act.</span></div>
-      <ChatBox channel="Dead players" ghost />
-      <button className="secondary" onClick={() => setScreen('nightResult')}>Watch Sunrise Report</button>
-    </ScreenShell>
+    <Screen centered className="result-page">
+      <Header title={title} kicker="Server resolved" right={formatTime(secondsLeft)} />
+      <div className="alert-symbol">!</div>
+      <h2 className="result-title">{result?.summary || 'Resolving result...'}</h2>
+      {result?.eliminatedName && <div className="eliminated-card"><Avatar name={result.eliminatedName} color="#315f4d" /><div><strong>{result.eliminatedName}</strong><span>{result.eliminatedRole || 'Role hidden'}</span></div></div>}
+      <div className="result-stack"><span>Day {state.game?.day}</span>{result?.votesCast !== undefined && <span>{result.votesCast} votes cast</span>}<span>Next phase starts automatically</span></div>
+    </Screen>
   );
 }
 
-function NightResultScreen({ setScreen }: ScreenProps) {
+function GameOver({ state }: { state: RoomState }) {
   return (
-    <ScreenShell centered>
-      <Header title="Sunrise Report" kicker="Night resolved" right="00:10" />
-      <div className="sunrise-card"><span>☀</span><strong>One player was eliminated last night.</strong></div>
-      <div className="eliminated-card"><Avatar name="Jisoo" color="#315f4d" /><div><strong>Jisoo</strong><span>Role hidden</span></div></div>
-      <div className="result-stack"><span>Doctor protected Minseo</span><span>Detective received a private result</span><span>Day 2 begins next</span></div>
-      <button className="primary" onClick={() => setScreen('gameOver')}>Continue</button>
-    </ScreenShell>
-  );
-}
-
-function GameOverScreen({ setScreen }: ScreenProps) {
-  return (
-    <ScreenShell className="game-over">
+    <Screen className="game-over">
       <div className="victory-moon">☾</div>
-      <h2 className="victory-title">MAFIA WINS</h2>
-      <p className="muted center">The city sleeps. The shadows remain.</p>
-      <div className="mvp-card"><span>Best Deceiver</span><strong>Hana</strong><p>Convinced 4 players to vote wrong.</p></div>
-      <div className="role-reveal-grid">{players.slice(0, 6).map((player) => <div key={player.id}><strong>{player.name}</strong><span className={player.role === 'Mafia' ? 'danger-text' : ''}>{player.role}</span></div>)}</div>
-      <div className="dual-actions"><button className="secondary" onClick={() => setScreen('matchHistory')}>Stats</button><button className="primary" onClick={() => setScreen('lobby')}>Play Again</button></div>
-    </ScreenShell>
+      <h2 className="victory-title">{(state.game?.winner || 'Unknown').toUpperCase()} WINS</h2>
+      <p className="muted center">The final roles are revealed. The match has ended.</p>
+      <div className="role-grid">{state.players.map((player) => <div key={player.id}><strong>{player.name}</strong><span className={player.role === 'Mafia' ? 'danger' : ''}>{player.role}</span></div>)}</div>
+      <div className="stats-row"><Stat value={String(state.players.length)} label="Players" /><Stat value={String(state.game?.day || 1)} label="Days" /><Stat value={String(state.players.filter((p) => p.alive).length)} label="Alive" /></div>
+    </Screen>
   );
 }
 
-function HostControlsScreen({ setScreen }: ScreenProps) {
+function AdminPanel({ token, user, showToast }: { token: string; user: User | null; showToast: (text: string, type?: 'success' | 'error') => void }) {
+  const [overview, setOverview] = useState<AdminOverview | null>(null);
+  const [loading, setLoading] = useState(false);
+  const load = async () => {
+    if (!token) return;
+    try {
+      setLoading(true);
+      const data = await api<{ ok: true } & AdminOverview>('/api/admin/overview', {}, token);
+      setOverview(data);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Admin request failed.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { load(); }, [token]);
+  if (user?.role !== 'admin') return <Screen centered><Header title="Admin Locked" kicker="Permission required" /><p className="muted center">Create the first account or use admin@midnight.vote to access admin tools.</p></Screen>;
   return (
-    <ScreenShell>
-      <Header title="Host Controls" kicker="Live moderation" right="03:12" />
-      <PhaseBanner title="Day 2 is active" text="Host actions are shown in game history." />
-      <div className="host-grid"><button>Ⅱ<span>Pause Timer</span></button><button>»<span>Skip Phase</span></button><button>☷<span>Manage Players</span></button><button className="danger-action">×<span>End Game</span></button></div>
-      <div className="inactive-card"><Avatar name="Dae" color="#2b5d90" /><div><strong>Dae is inactive</strong><span>No response for 02:34</span></div><button>Warn</button></div>
-      <div className="activity-log"><span>03:14 Host paused timer</span><span>03:10 Hana returned online</span><span>02:58 Vote phase scheduled</span></div>
-      <button className="primary" onClick={() => setScreen('dayDiscussion')}>Return to Game</button>
-    </ScreenShell>
+    <Screen>
+      <Header title="Admin Panel" kicker="Live operations" right={loading ? 'SYNC' : 'ADMIN'} />
+      <div className="stats-row"><Stat value={String(overview?.stats.users || 0)} label="Users" /><Stat value={String(overview?.stats.rooms || 0)} label="Rooms" /><Stat value={String(overview?.stats.activeRooms || 0)} label="Active" /></div>
+      <SectionTitle title="Rooms" value={`${overview?.rooms.length || 0} total`} />
+      <div className="admin-list">{overview?.rooms.map((room) => <div key={room.code} className="admin-row"><div><strong>{room.code}</strong><span>{room.status} • {room.phase} • {room.players} players</span></div><button onClick={async () => { await api(`/api/admin/rooms/${room.code}/end`, { method: 'POST' }, token); showToast('Room ended.'); load(); }}>End</button></div>) || <p className="hint">No rooms yet.</p>}</div>
+      <SectionTitle title="Users" value={`${overview?.users.length || 0} total`} />
+      <div className="admin-list">{overview?.users.map((item) => <div key={item.id} className="admin-row"><div><strong>{item.displayName}</strong><span>{item.email} • {item.role}</span></div><em>{item.stats.matches} matches</em></div>)}</div>
+      <button className="secondary" onClick={load}>Refresh Admin Data</button>
+    </Screen>
   );
 }
 
-function MatchHistoryScreen({ setScreen }: ScreenProps) {
-  return (
-    <ScreenShell>
-      <Header title="Match History" kicker="Your record" right="18" />
-      <div className="stats-row"><Stat value="7" label="Wins" /><Stat value="18" label="Matches" /><Stat value="62%" label="Reads" /></div>
-      {['Mafia win • After Class', 'Citizen win • Midnight Club', 'Mafia win • Room R7K2Q', 'Citizen win • Final Bell'].map((item, index) => <HistoryRow key={item} title={item} meta={`${index + 1} nights • ${index + 6} players`} />)}
-      <button className="secondary" onClick={() => setScreen('home')}>Back Home</button>
-    </ScreenShell>
-  );
+function RulesScreen({ onBack }: { onBack: () => void }) {
+  return <Screen><Header title="How to Play" kicker="Game rules" /><Rule number="01" title="Day" text="Everyone discusses and searches for contradictions." /><Rule number="02" title="Vote" text="Alive players vote to eliminate one suspect." /><Rule number="03" title="Night" text="Mafia attack. Doctor protects. Detective investigates." /><Rule number="04" title="Win" text="Citizens win by removing all Mafia. Mafia win by outnumbering Citizens." /><button className="primary" onClick={onBack}>Got It</button></Screen>;
 }
 
-function RulesScreen({ setScreen }: ScreenProps) {
-  return (
-    <ScreenShell>
-      <Header title="How to Play" kicker="Rules guide" />
-      <RuleCard number="01" title="Day" text="Everyone talks. Use evidence, lies, and voting pressure to find the Mafia." />
-      <RuleCard number="02" title="Vote" text="Alive players vote for one suspect. The top-voted player is eliminated." />
-      <RuleCard number="03" title="Night" text="Mafia attack. Doctor protects. Detective investigates privately." />
-      <RuleCard number="04" title="Win" text="Citizens win by removing all Mafia. Mafia win when they equal or outnumber Citizens." />
-      <button className="primary" onClick={() => setScreen('home')}>Got It</button>
-    </ScreenShell>
-  );
+function ProfileScreen({ user, logout, onBack }: { user: User | null; logout: () => void; onBack: () => void }) {
+  return <Screen><Header title="Profile" kicker="Account" /><div className="profile-card"><Avatar name={user?.displayName || 'Guest'} color="#c4123d" large /><h2>{user?.displayName || 'Guest'}</h2><span>{user?.email || 'No account yet'}</span></div>{user && <div className="stats-row"><Stat value={String(user.stats.matches)} label="Matches" /><Stat value={String(user.stats.gamesHosted)} label="Hosted" /><Stat value={user.role} label="Role" /></div>}<button className="secondary" onClick={onBack}>Back</button>{user && <button className="primary danger-button" onClick={logout}>Logout</button>}</Screen>;
 }
 
-function ProfileScreen({ setScreen }: ScreenProps) {
-  return (
-    <ScreenShell>
-      <Header title="Profile" kicker="Player identity" />
-      <div className="profile-detail-card"><Avatar name="Macaulay" color="#c4123d" large /><h2>Macaulay</h2><span>Shadow strategist</span></div>
-      <div className="setting-panel"><InfoRow label="Favorite role" value="Mafia" /><InfoRow label="Win rate" value="44%" /><InfoRow label="Best streak" value="3" /><InfoRow label="Region" value="Lagos" /></div>
-      <button className="secondary" onClick={() => setScreen('notifications')}>Notification Settings</button>
-      <button className="primary" onClick={() => setScreen('home')}>Save Profile</button>
-    </ScreenShell>
-  );
+function ChatPanel({ state, channel }: { state: RoomState; channel: Message['channel'] }) {
+  const [body, setBody] = useState('');
+  const messages = state.messages.filter((message) => message.channel === channel || message.channel === 'system').slice(-5);
+  const send = () => {
+    if (!body.trim()) return;
+    const socket = io(SOCKET_URL, { auth: { sessionId: state.me?.id }, autoConnect: false });
+    socket.connect();
+    socket.emit('chat:send', { channel, body }, () => { setBody(''); socket.disconnect(); });
+  };
+  return <div className="chat-card"><div className="chat-title">{channel === 'mafia' ? 'Mafia private chat' : channel === 'lobby' ? 'Lobby chat' : 'Public chat'}</div>{messages.map((message) => <p className="message" key={message.id}><strong>{message.senderName}</strong><span>{message.body}</span></p>)}<div className="chat-input"><input value={body} onChange={(event) => setBody(event.target.value)} placeholder="Send message..." /><button onClick={send}>Send</button></div></div>;
 }
 
-function NotificationsScreen({ setScreen }: ScreenProps) {
-  return (
-    <ScreenShell>
-      <Header title="Notifications" kicker="Alerts" />
-      <div className="setting-panel spacious"><ToggleRow label="Room invites" active /><ToggleRow label="Phase started" active /><ToggleRow label="Vote reminder" active /><ToggleRow label="Night action reminder" active /><ToggleRow label="Marketing updates" /></div>
-      <SafetyCard />
-      <button className="primary" onClick={() => setScreen('profile')}>Save Alerts</button>
-    </ScreenShell>
-  );
-}
-
-function ReconnectScreen({ setScreen }: ScreenProps) {
-  return (
-    <ScreenShell centered>
-      <div className="alert-symbol pulse">↻</div>
-      <h2 className="result-title">Reconnecting to room...</h2>
-      <p className="muted center">We are restoring your session and current game state.</p>
-      <div className="loading-bar"><i /></div>
-      <button className="secondary" onClick={() => setScreen('dayDiscussion')}>Return to Game</button>
-    </ScreenShell>
-  );
-}
-
-function EmptyStateScreen({ setScreen }: ScreenProps) {
-  return (
-    <ScreenShell centered>
-      <div className="empty-illustration">☾</div>
-      <h2 className="result-title">No rooms yet.</h2>
-      <p className="muted center">Create a private room and send the invite link to your friends.</p>
-      <button className="primary" onClick={() => setScreen('createRoom')}>Create First Room</button>
-    </ScreenShell>
-  );
-}
-
-function NightActionLayout({ title, kicker, timer, accent, instruction, cta, selected, result, onNext }: { title: string; kicker: string; timer: string; accent: 'red' | 'blue' | 'green'; instruction: string; cta: string; selected: string; result?: string; onNext: () => void }) {
-  return (
-    <ScreenShell className={`night-action ${accent}`}>
-      <Header title={title} kicker={kicker} right={timer} />
-      <PhaseBanner title={instruction} text="Select a player and confirm before the timer reaches zero." />
-      <div className="vote-list">
-        {players.filter((p) => p.status !== 'eliminated' && p.name !== 'You').slice(0, 6).map((player) => (
-          <button key={player.id} className={player.name === selected ? `selected ${accent}` : ''}>
-            <Avatar name={player.name} color={player.color} />
-            <div><strong>{player.name}</strong><span>{player.name === selected ? 'Selected target' : 'Available'}</span></div>
-            <em>{player.name === selected ? '✓' : ''}</em>
-          </button>
-        ))}
-      </div>
-      {result && <InfoCard label="Private result" text={result} />}
-      <button className={`primary ${accent === 'blue' ? 'blue-button' : accent === 'green' ? 'green-button' : ''}`} onClick={onNext}>{cta}</button>
-    </ScreenShell>
-  );
-}
-
-function AllScreensOverlay({ active, onClose, onSelect }: { active: AppScreen; onClose: () => void; onSelect: (screen: AppScreen) => void }) {
-  return (
-    <div className="all-screens-overlay">
-      <div className="all-screens-panel">
-        <div className="all-screens-header"><div><p className="eyebrow">Preview map</p><h2>All App Pages</h2></div><button onClick={onClose}>Close</button></div>
-        <div className="all-screen-grid">
-          {screens.map((screen, index) => (
-            <div
-              key={screen.id}
-              className={`screen-thumbnail ${active === screen.id ? 'active' : ''}`}
-              role="button"
-              tabIndex={0}
-              onClick={() => onSelect(screen.id)}
-              onKeyDown={(event) => { if (event.key === 'Enter') onSelect(screen.id); }}
-            >
-              <div className="mini-phone-thumb" aria-hidden="true">
-                <div className="mini-phone-inner"><ScreenRenderer screen={screen.id} setScreen={() => undefined} /></div>
-              </div>
-              <span>{String(index + 1).padStart(2, '0')}</span>
-              <strong>{screen.label}</strong>
-              <em>{screen.group}</em>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-type ScreenProps = { setScreen: (screen: AppScreen) => void };
-
-function ScreenShell({ children, className = '', centered = false }: { children: React.ReactNode; className?: string; centered?: boolean }) {
-  return <section className={`app-screen ${className} ${centered ? 'centered' : ''}`}>{children}</section>;
-}
-
-function StatusBar() {
-  return <div className="status-bar"><span>21:09</span><span>5G ▰▰</span></div>;
-}
-
-function Logo() {
-  return <div className="logo-mark"><span>☾</span></div>;
-}
-
-function Header({ title, kicker, right }: { title: string; kicker?: string; right?: string }) {
-  return <header className="page-header"><div>{kicker && <p className="eyebrow">{kicker}</p>}<h2>{title}</h2></div>{right && <span className="header-chip">{right}</span>}</header>;
-}
-
-function Avatar({ name, color, large = false }: { name: string; color: string; large?: boolean }) {
-  return <span className={`avatar ${large ? 'large' : ''}`} style={{ background: color }}>{name.slice(0, 1).toUpperCase()}</span>;
-}
-
-function MiniFeature({ icon, title, text }: { icon: string; title: string; text: string }) {
-  return <div className="mini-feature"><span>{icon}</span><strong>{title}</strong><em>{text}</em></div>;
-}
-
-function SafetyCard() {
-  return <div className="safety-card"><strong>Safety boundary</strong><span>Fictional game only. No device locking, coercion, tracking without consent, threats, or harmful mechanics.</span></div>;
-}
-
-function SectionTitle({ title, value }: { title: string; value?: string }) {
-  return <div className="section-title"><span>{title}</span>{value && <em>{value}</em>}</div>;
-}
-
-function RoomPreview({ name, code, players: count, status, onClick }: { name: string; code: string; players: string; status: string; onClick: () => void }) {
-  return <button className="room-preview" onClick={onClick}><div><strong>{name}</strong><span>{status}</span></div><em>{code}</em><b>{count}</b></button>;
-}
-
-function PlayerRow({ player, lobby = false }: { player: Player; lobby?: boolean }) {
-  return <div className="player-row"><Avatar name={player.name} color={player.color} /><div><strong>{player.name}</strong><span>{lobby ? player.status : player.role}</span></div><em className={player.status === 'ready' || player.status === 'alive' ? 'ready' : ''}>{lobby ? player.status : `${player.votes} votes`}</em></div>;
-}
-
-function PlayerCard({ player, onClick }: { player: Player; onClick: () => void }) {
-  return <button className="player-card" onClick={onClick}><Avatar name={player.name} color={player.color} /><strong>{player.name}</strong><span>{player.status}</span><div className="meter"><i style={{ width: `${player.suspicion}%` }} /></div></button>;
-}
-
-function ChatBox({ channel, ghost = false }: { channel: string; ghost?: boolean }) {
-  const messages = ghost ? [['Sora', 'I knew it was Hana.'], ['Mina', 'Don’t say anything to living players.'], ['System', 'Dead chat cannot affect votes.']] : [['Hana', 'Why did Minseo avoid the first vote?'], ['Minseo', 'I was watching Dae.'], ['Dae', 'Track who changed late.']];
-  return <div className="chat-card"><div className="chat-title"><span>{channel}</span></div>{messages.map(([name, text]) => <p className={`message ${name === 'System' ? 'system' : ''}`} key={name + text}><strong>{name}</strong><span>{text}</span></p>)}<div className="chat-input"><input placeholder="Send message..." /><button>Send</button></div></div>;
-}
-
-function PhaseBanner({ title, text }: { title: string; text: string }) {
-  return <div className="phase-banner"><strong>{title}</strong><span>{text}</span></div>;
-}
-
-function InfoCard({ label, text }: { label: string; text: string }) {
-  return <div className="info-card"><span>{label}</span><strong>{text}</strong></div>;
-}
-
-function NumberRow({ label, value, danger, blue, green }: { label: string; value: string; danger?: boolean; blue?: boolean; green?: boolean }) {
-  return <div className={`number-row ${danger ? 'danger' : ''} ${blue ? 'blue' : ''} ${green ? 'green' : ''}`}><span>{label}</span><div><button>−</button><strong>{value}</strong><button>+</button></div></div>;
-}
-
-function SliderRow({ label, value, percent }: { label: string; value: string; percent: number }) {
-  return <div className="slider-row"><div><span>{label}</span><strong>{value}</strong></div><i><b style={{ width: `${percent}%` }} /></i></div>;
-}
-
-function ToggleRow({ label, active = false }: { label: string; active?: boolean }) {
-  return <div className="toggle-row"><span>{label}</span><i className={active ? 'active' : ''}><b /></i></div>;
-}
-
-function InfoRow({ label, value }: { label: string; value: string }) {
-  return <div className="info-row"><span>{label}</span><strong>{value}</strong></div>;
-}
-
-function Stat({ value, label }: { value: string; label: string }) {
-  return <div className="stat"><strong>{value}</strong><span>{label}</span></div>;
-}
-
-function HistoryRow({ title, meta }: { title: string; meta: string }) {
-  return <div className="history-row"><div><strong>{title}</strong><span>{meta}</span></div><em>View</em></div>;
-}
-
-function RuleCard({ number, title, text }: { number: string; title: string; text: string }) {
-  return <div className="rule-card"><span>{number}</span><div><strong>{title}</strong><p>{text}</p></div></div>;
-}
+function CinematicBackdrop() { return <div className="cinematic-bg"><span /><span /><span /><i /></div>; }
+function Screen({ children, centered = false, className = '' }: { children: ReactNode; centered?: boolean; className?: string }) { return <section className={`screen ${centered ? 'centered' : ''} ${className}`}>{children}</section>; }
+function StatusBar() { return <div className="status-bar"><span>21:09</span><span>5G ▰▰</span></div>; }
+function Logo() { return <div className="logo"><span>☾</span></div>; }
+function Header({ title, kicker, right }: { title: string; kicker?: string; right?: string }) { return <header className="header"><div>{kicker && <p className="eyebrow">{kicker}</p>}<h2>{title}</h2></div>{right && <em>{right}</em>}</header>; }
+function Avatar({ name, color, large = false }: { name: string; color: string; large?: boolean }) { return <span className={`avatar ${large ? 'large' : ''}`} style={{ background: color }}>{name.slice(0, 1).toUpperCase()}</span>; }
+function SafetyCard() { return <div className="safety"><strong>Safe fictional game</strong><span>No device locking, threats, coercion, or harmful real-world mechanics.</span></div>; }
+function Timeline() { return <div className="timeline"><span>Onboard</span><span>Room</span><span>Role</span><span>Vote</span><span>Night</span><span>Win</span></div>; }
+function SectionTitle({ title, value }: { title: string; value?: string }) { return <div className="section-title"><strong>{title}</strong>{value && <span>{value}</span>}</div>; }
+function Stepper({ label, value, min, max, step = 1, suffix = '', onChange }: { label: string; value: number; min: number; max: number; step?: number; suffix?: string; onChange: (value: number) => void }) { const clamp = (n: number) => Math.min(max, Math.max(min, n)); return <div className="stepper"><span>{label}</span><div><button onClick={() => onChange(clamp(value - step))}>−</button><strong>{value}{suffix}</strong><button onClick={() => onChange(clamp(value + step))}>+</button></div></div>; }
+function Toggle({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) { return <button className="toggle" onClick={onClick}><span>{label}</span><i className={active ? 'active' : ''}><b /></i></button>; }
+function PlayerRow({ player }: { player: Player }) { return <div className="player-row"><Avatar name={player.name} color={player.color} /><div><strong>{player.name}{player.bot ? ' · Bot' : ''}</strong><span>{player.host ? 'Host' : player.connected ? 'Online' : 'Offline'}</span></div><em className={player.ready ? 'ready' : ''}>{player.ready ? 'Ready' : 'Waiting'}</em></div>; }
+function PlayerCard({ player }: { player: Player }) { return <div className="player-card"><Avatar name={player.name} color={player.color} /><strong>{player.name}</strong><span>{player.role || (player.connected ? 'Online' : 'Offline')}</span></div>; }
+function PhaseBanner({ title, text }: { title: string; text: string }) { return <div className="phase-banner"><strong>{title}</strong><span>{text}</span></div>; }
+function Stat({ value, label }: { value: string; label: string }) { return <div className="stat"><strong>{value}</strong><span>{label}</span></div>; }
+function Rule({ number, title, text }: { number: string; title: string; text: string }) { return <div className="rule"><span>{number}</span><div><strong>{title}</strong><p>{text}</p></div></div>; }
+function roleIcon(role: Role | null) { return role === 'Mafia' ? '☾' : role === 'Detective' ? '?' : role === 'Doctor' ? '🛡' : '✦'; }
+function roleCopy(role: Role | null) { return role === 'Mafia' ? 'Secretly choose one player at night.' : role === 'Detective' ? 'Investigate one player every night.' : role === 'Doctor' ? 'Protect one player from attack.' : 'Use discussion and voting to find Mafia.'; }
+function roleNightInstruction(role: Role | null) { return role === 'Mafia' ? 'Choose a target to attack.' : role === 'Detective' ? 'Investigate one player’s alignment.' : role === 'Doctor' ? 'Protect one player tonight.' : 'Wait for sunrise.'; }

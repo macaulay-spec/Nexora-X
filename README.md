@@ -1,12 +1,13 @@
 # Nexora-X / Midnight Vote Multiplayer MVP
 
-A mobile-first frontend preview and realtime PWA MVP for **Midnight Vote**, an original fictional social deduction party game.
+A mobile-first full-stack realtime PWA MVP for **Midnight Vote**, an original fictional social deduction party game.
 
 ## What is included
 
-- Full dark cinematic frontend preview with 28 app screens
-- Desktop design workbench with screen navigator
-- Mobile preview with an All Screens map and mini previews
+- Cinematic animated onboarding experience
+- Functional create-account and login flow
+- In-memory account/session backend
+- Admin account support and functional admin panel
 - Socket.io realtime rooms on the same origin as the app
 - Guest sessions with reconnect support by local session ID
 - Create/join room with shareable room code
@@ -77,13 +78,19 @@ VITE_SOCKET_URL=https://your-backend-url.example.com
 
 See `.env.example` and `render.yaml`.
 
-## How to preview the frontend
+## How to test the full-stack app
 
-Run the app and use the left-side screen navigator on desktop, or tap **Map** on mobile. The preview includes every designed screen: splash, welcome, auth, home, room creation, lobby, room settings, role reveal, day discussion, player profile sheet, voting, vote result, night intro, Mafia action, Detective action, Doctor action, Citizen night, dead chat, night result, game over, host controls, match history, rules, profile, notifications, reconnect, and empty states.
+1. Open the app.
+2. Create an account. The first account automatically becomes admin; `admin@midnight.vote` is also treated as an admin demo account.
+3. Create a room.
+4. Add demo bot players until there are at least 4 players.
+5. Ready up and start the game.
+6. Play through role reveal, day discussion, voting, night actions, results, and game over.
+7. Open the Admin Panel from Home when signed in as admin to view users, rooms, room status, and end active rooms.
 
-## Realtime MVP note
+## Full-stack MVP note
 
-The backend game engine is still included. This latest iteration focuses the visible app on the full UI/UX frontend preview, while the Socket.io server remains available for continuing the multiplayer implementation path.
+The current backend uses in-memory users, sessions, rooms, and matches. That is enough for the playable MVP and live preview. For production, the next step is replacing in-memory stores with PostgreSQL/Supabase plus Redis for realtime room state and timers.
 
 ## Product docs
 
