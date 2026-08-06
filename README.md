@@ -1,10 +1,12 @@
 # Nexora-X / Midnight Vote Multiplayer MVP
 
-A mobile-first realtime PWA MVP for **Midnight Vote**, an original fictional social deduction party game.
+A mobile-first frontend preview and realtime PWA MVP for **Midnight Vote**, an original fictional social deduction party game.
 
 ## What is included
 
-- Dark cinematic mobile UI
+- Full dark cinematic frontend preview with 28 app screens
+- Desktop design workbench with screen navigator
+- Mobile preview with an All Screens map and mini previews
 - Socket.io realtime rooms on the same origin as the app
 - Guest sessions with reconnect support by local session ID
 - Create/join room with shareable room code
@@ -75,13 +77,13 @@ VITE_SOCKET_URL=https://your-backend-url.example.com
 
 See `.env.example` and `render.yaml`.
 
-## How to test alone
+## How to preview the frontend
 
-1. Create a room.
-2. Tap **Add Demo Player** until there are at least 4 players.
-3. Tap **Ready Up**.
-4. Tap **Start Game**.
-5. Use Host controls to skip phases quickly while testing.
+Run the app and use the left-side screen navigator on desktop, or tap **Map** on mobile. The preview includes every designed screen: splash, welcome, auth, home, room creation, lobby, room settings, role reveal, day discussion, player profile sheet, voting, vote result, night intro, Mafia action, Detective action, Doctor action, Citizen night, dead chat, night result, game over, host controls, match history, rules, profile, notifications, reconnect, and empty states.
+
+## Realtime MVP note
+
+The backend game engine is still included. This latest iteration focuses the visible app on the full UI/UX frontend preview, while the Socket.io server remains available for continuing the multiplayer implementation path.
 
 ## Product docs
 
