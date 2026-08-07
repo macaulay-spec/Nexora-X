@@ -4,10 +4,13 @@ A mobile-first full-stack realtime PWA MVP for **Midnight Vote**, an original fi
 
 ## What is included
 
+- Reference-style Incoming Transmission landing flow
+- Identify / Re-enter account experience
+- Headquarters dashboard experience
 - Cinematic animated onboarding experience
 - Functional create-account and login flow
 - In-memory account/session backend
-- Admin account support and functional admin panel
+- Admin account support and functional Control Room panel
 - Socket.io realtime rooms on the same origin as the app
 - Guest sessions with reconnect support by local session ID
 - Create/join room with shareable room code
@@ -80,13 +83,15 @@ See `.env.example` and `render.yaml`.
 
 ## How to test the full-stack app
 
-1. Open the app.
-2. Create an account. The first account automatically becomes admin; `admin@midnight.vote` is also treated as an admin demo account.
-3. Create a room.
-4. Add demo bot players until there are at least 4 players.
-5. Ready up and start the game.
-6. Play through role reveal, day discussion, voting, night actions, results, and game over.
-7. Open the Admin Panel from Home when signed in as admin to view users, rooms, room status, and end active rooms.
+1. Open the app. You can also visit `/headquarters` or `/auth` directly.
+2. Begin the Incoming Transmission.
+3. Create an account. The first account automatically becomes admin; `admin@midnight.vote` is also treated as an admin demo account.
+4. Enter Headquarters.
+5. Create a room.
+6. Add demo bot players until there are at least 4 players.
+7. Ready up and start the game.
+8. Play through role reveal, day discussion, voting, night actions, results, and game over.
+9. Open the Control Room/Admin Panel from Headquarters when signed in as admin to view users, rooms, room status, and end active rooms.
 
 ## Full-stack MVP note
 

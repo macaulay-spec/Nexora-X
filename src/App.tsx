@@ -124,6 +124,15 @@ function readStoredUser() {
   }
 }
 
+function initialPage(): Page {
+  const path = window.location.pathname;
+  const hasUser = Boolean(readStoredUser());
+  if (path.includes('headquarters')) return hasUser ? 'home' : 'auth';
+  if (path.includes('auth') || path.includes('identify')) return 'auth';
+  if (path.includes('rules')) return 'rules';
+  return 'onboarding';
+}
+
 function formatTime(seconds: number) {
   const min = Math.floor(seconds / 60).toString().padStart(2, '0');
   const sec = (seconds % 60).toString().padStart(2, '0');
@@ -158,7 +167,7 @@ async function api<T>(path: string, options: RequestInit = {}, token?: string): 
 }
 
 export default function App() {
-  const [page, setPage] = useState<Page>('onboarding');
+  const [page, setPage] = useState<Page>(() => initialPage());
   const [authMode, setAuthMode] = useState<AuthMode>('register');
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) || '');
   const [user, setUser] = useState<User | null>(() => readStoredUser());
@@ -234,12 +243,12 @@ export default function App() {
       <CinematicBackdrop />
       <aside className="desktop-panel">
         <Logo />
-        <p className="eyebrow">Full-stack cinematic MVP</p>
+        <p className="eyebrow">Protocol-grade full-stack app</p>
         <h1>Midnight Vote</h1>
-        <p>A functional social deduction web app with auth, realtime rooms, game phases, admin tools, and motion design.</p>
+        <p>Incoming transmission, Identify auth, Headquarters dashboard, realtime game rooms, admin surveillance, and cinematic motion.</p>
         <div className="desktop-status"><span>Socket</span><strong>{connected ? 'Live' : 'Offline'}</strong></div>
         <nav>
-          <button onClick={() => setPage('home')}>Home</button>
+          <button onClick={() => setPage('home')}>Headquarters</button>
           <button onClick={() => setPage('create')}>Create Room</button>
           <button onClick={() => setPage('join')}>Join Room</button>
           <button onClick={() => setPage('rules')}>Rules</button>
@@ -280,12 +289,13 @@ function Onboarding({ onStart, onRules }: { onStart: () => void; onRules: () => 
     <Screen centered className="onboarding">
       <div className="cinematic-bars"><i /><i /></div>
       <div className="moon-orbit"><Logo /></div>
-      <p className="eyebrow center">Realtime mystery party game</p>
-      <h2 className="hero-title">When night falls, choose wisely.</h2>
-      <p className="muted center">Create rooms, reveal secret roles, vote by day, act by night, and survive until one team wins.</p>
-      <div className="motion-cards"><span>Role</span><span>Vote</span><span>Night</span></div>
-      <button className="primary" onClick={onStart}>Start Game</button>
-      <button className="secondary" onClick={onRules}>How It Works</button>
+      <p className="eyebrow center">Incoming Transmission</p>
+      <h2 className="hero-title glitch" data-text="Survive the Protocol">Survive the Protocol</h2>
+      <p className="muted center">Use headphones. Dim the lights. What follows is a fictional social deduction protocol.</p>
+      <div className="transmission-panel"><span>◉ Signal detected</span><span>◌ Identity required</span><span>▣ Room protocol armed</span></div>
+      <div className="motion-cards"><span>Identify</span><span>Headquarters</span><span>Nightfall</span></div>
+      <button className="primary" onClick={onStart}>Begin Transmission</button>
+      <button className="secondary" onClick={onRules}>Read Protocol</button>
     </Screen>
   );
 }
@@ -315,16 +325,16 @@ function AuthScreen({ mode, setMode, saveAuth, showToast, onContinue }: { mode: 
 
   return (
     <Screen>
-      <Header title={mode === 'register' ? 'Create Account' : 'Welcome Back'} kicker="Secure player profile" />
-      <div className="auth-switch"><button className={mode === 'register' ? 'active' : ''} onClick={() => setMode('register')}>Create</button><button className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>Login</button></div>
+      <Header title={mode === 'register' ? 'Identify' : 'Re-enter'} kicker="Only the living may proceed" />
+      <div className="auth-switch"><button className={mode === 'register' ? 'active' : ''} onClick={() => setMode('register')}>Create</button><button className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>Re-enter</button></div>
       <div className="form-card">
-        {mode === 'register' && <label>Display name<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} /></label>}
-        <label>Email<input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" /></label>
-        <label>Password<input value={password} onChange={(event) => setPassword(event.target.value)} type="password" /></label>
-        <button className="primary" onClick={submit} disabled={loading}>{loading ? 'Please wait...' : mode === 'register' ? 'Create Account' : 'Login'}</button>
+        {mode === 'register' && <label>Codename<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} /></label>}
+        <label>Signal (email)<input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" /></label>
+        <label>Cipher (password)<input value={password} onChange={(event) => setPassword(event.target.value)} type="password" /></label>
+        <button className="primary" onClick={submit} disabled={loading}>{loading ? 'Authorizing...' : mode === 'register' ? 'Enter Protocol' : 'Re-enter'}</button>
       </div>
       <SafetyCard />
-      <p className="hint">Tip: the first created account becomes admin. Use admin@midnight.vote to demo admin access.</p>
+      <button className="google-ghost" type="button">Continue with Google — coming soon</button><p className="hint">No identity? Register. First account becomes admin. Demo admin signal: admin@midnight.vote</p>
     </Screen>
   );
 }
@@ -332,7 +342,7 @@ function AuthScreen({ mode, setMode, saveAuth, showToast, onContinue }: { mode: 
 function HomeScreen({ user, onAuth, onCreate, onJoin, onAdmin, onProfile }: { user: User | null; onAuth: () => void; onCreate: () => void; onJoin: () => void; onAdmin: () => void; onProfile: () => void }) {
   return (
     <Screen>
-      <Header title="Midnight Hub" kicker={user ? `Signed in as ${user.displayName}` : 'Guest mode'} right={user?.role === 'admin' ? 'ADMIN' : 'LIVE'} />
+      <Header title="Headquarters" kicker={user ? `Agent ${user.displayName}` : 'Unverified visitor'} right={user?.role === 'admin' ? 'ADMIN' : 'LIVE'} />
       <button className="profile-strip" onClick={user ? onProfile : onAuth}>
         <Avatar name={user?.displayName || 'Guest'} color="#c4123d" />
         <div><strong>{user?.displayName || 'Guest Player'}</strong><span>{user ? `${user.stats.matches} matches • ${user.stats.gamesHosted} hosted` : 'Create an account to save progress'}</span></div>
@@ -343,9 +353,10 @@ function HomeScreen({ user, onAuth, onCreate, onJoin, onAdmin, onProfile }: { us
         <button><span>▶</span><strong>Quick Demo</strong><em>Add bots and test</em></button>
         <button onClick={onAdmin} disabled={user?.role !== 'admin'}><span>◎</span><strong>Admin Panel</strong><em>Monitor rooms</em></button>
       </div>
-      <SectionTitle title="Cinematic flow" value="full-stack" />
+      <div className="hq-hero"><span>PROTOCOL STATUS</span><strong>Night cycle standing by</strong><p>Create or join a private room to initialize the social deduction sequence.</p></div>
+      <SectionTitle title="Protocol sequence" value="armed" />
       <Timeline />
-      {!user && <button className="primary" onClick={onAuth}>Create Account / Login</button>}
+      {!user && <button className="primary" onClick={onAuth}>Create Account / Re-enter</button>}
     </Screen>
   );
 }
@@ -394,7 +405,7 @@ function LobbyScreen({ state, emitAck }: { state: RoomState; emitAck: (event: st
       <div className="invite-card"><div><span>Invite link</span><strong>{invite.replace(/^https?:\/\//, '')}</strong></div><button onClick={() => navigator.clipboard?.writeText(invite)}>Copy</button></div>
       <div className="progress-card"><span>{readyCount}/{state.players.length} ready</span><i><b style={{ width: `${(readyCount / Math.max(1, state.players.length)) * 100}%` }} /></i></div>
       <div className="player-list">{state.players.map((player) => <PlayerRow key={player.id} player={player} />)}</div>
-      <ChatPanel state={state} channel="lobby" />
+      <ChatPanel state={state} channel="lobby" emitAck={emitAck} />
       <div className="split-buttons"><button className="secondary" onClick={() => emitAck('player:ready', { ready: !state.me?.ready })}>{state.me?.ready ? 'Not Ready' : 'Ready Up'}</button>{state.me?.host && <button className="secondary" onClick={() => emitAck('room:addBot')}>Add Bot</button>}</div>
       {state.me?.host && <button className="primary sticky" onClick={() => emitAck('game:start')}>Start Game</button>}
     </Screen>
@@ -432,7 +443,7 @@ function DayDiscussion({ state, secondsLeft, emitAck }: { state: RoomState; seco
       <Header title={`DAY ${state.game?.day}`} kicker="Discuss and find Mafia" right={formatTime(secondsLeft)} />
       <PhaseBanner title="Public chat is open" text="Accuse, defend, and track contradictions before voting starts." />
       <div className="player-grid">{alive.map((player) => <PlayerCard key={player.id} player={player} />)}</div>
-      <ChatPanel state={state} channel="day" />
+      <ChatPanel state={state} channel="day" emitAck={emitAck} />
       {state.me?.host && <button className="primary sticky" onClick={() => emitAck('host:skipPhase')}>Skip to Vote</button>}
     </Screen>
   );
@@ -461,7 +472,7 @@ function NightActions({ state, secondsLeft, emitAck }: { state: RoomState; secon
       <Header title={`${me.role} Action`} kicker={`Night ${state.game?.day}`} right={formatTime(secondsLeft)} />
       <PhaseBanner title={roleNightInstruction(me.role)} text="Choose and confirm before sunrise. You may change your action until the timer ends." />
       <div className="vote-list">{candidates.map((player) => <button key={player.id} className={target === player.id ? `selected ${accent}` : ''} onClick={() => setTarget(player.id)}><Avatar name={player.name} color={player.color} /><div><strong>{player.name}</strong><span>{target === player.id ? 'Selected' : 'Available'}</span></div><em>{state.game?.myAction?.targetId === player.id ? 'Locked' : target === player.id ? '✓' : ''}</em></button>)}</div>
-      {me.role === 'Mafia' && <ChatPanel state={state} channel="mafia" />}
+      {me.role === 'Mafia' && <ChatPanel state={state} channel="mafia" emitAck={emitAck} />}
       {me.role === 'Detective' && state.game?.myAction?.result && <div className="info-card"><span>Private result</span><strong>{state.game.myAction.result.targetName} appears {state.game.myAction.result.alignment}.</strong></div>}
       <button className={`primary ${accent === 'blue' ? 'blue-button' : accent === 'green' ? 'green-button' : ''}`} onClick={() => emitAck('night:action', { targetId: target })}>Confirm Action</button>
     </Screen>
@@ -523,7 +534,7 @@ function AdminPanel({ token, user, showToast }: { token: string; user: User | nu
   if (user?.role !== 'admin') return <Screen centered><Header title="Admin Locked" kicker="Permission required" /><p className="muted center">Create the first account or use admin@midnight.vote to access admin tools.</p></Screen>;
   return (
     <Screen>
-      <Header title="Admin Panel" kicker="Live operations" right={loading ? 'SYNC' : 'ADMIN'} />
+      <Header title="Control Room" kicker="Administrative surveillance" right={loading ? 'SYNC' : 'ADMIN'} />
       <div className="stats-row"><Stat value={String(overview?.stats.users || 0)} label="Users" /><Stat value={String(overview?.stats.rooms || 0)} label="Rooms" /><Stat value={String(overview?.stats.activeRooms || 0)} label="Active" /></div>
       <SectionTitle title="Rooms" value={`${overview?.rooms.length || 0} total`} />
       <div className="admin-list">{overview?.rooms.map((room) => <div key={room.code} className="admin-row"><div><strong>{room.code}</strong><span>{room.status} • {room.phase} • {room.players} players</span></div><button onClick={async () => { await api(`/api/admin/rooms/${room.code}/end`, { method: 'POST' }, token); showToast('Room ended.'); load(); }}>End</button></div>) || <p className="hint">No rooms yet.</p>}</div>
@@ -542,16 +553,16 @@ function ProfileScreen({ user, logout, onBack }: { user: User | null; logout: ()
   return <Screen><Header title="Profile" kicker="Account" /><div className="profile-card"><Avatar name={user?.displayName || 'Guest'} color="#c4123d" large /><h2>{user?.displayName || 'Guest'}</h2><span>{user?.email || 'No account yet'}</span></div>{user && <div className="stats-row"><Stat value={String(user.stats.matches)} label="Matches" /><Stat value={String(user.stats.gamesHosted)} label="Hosted" /><Stat value={user.role} label="Role" /></div>}<button className="secondary" onClick={onBack}>Back</button>{user && <button className="primary danger-button" onClick={logout}>Logout</button>}</Screen>;
 }
 
-function ChatPanel({ state, channel }: { state: RoomState; channel: Message['channel'] }) {
+function ChatPanel({ state, channel, emitAck }: { state: RoomState; channel: Message['channel']; emitAck: (event: string, payload?: Record<string, unknown>) => Promise<Ack> }) {
   const [body, setBody] = useState('');
   const messages = state.messages.filter((message) => message.channel === channel || message.channel === 'system').slice(-5);
-  const send = () => {
-    if (!body.trim()) return;
-    const socket = io(SOCKET_URL, { auth: { sessionId: state.me?.id }, autoConnect: false });
-    socket.connect();
-    socket.emit('chat:send', { channel, body }, () => { setBody(''); socket.disconnect(); });
+  const send = async () => {
+    const trimmed = body.trim();
+    if (!trimmed) return;
+    const ack = await emitAck('chat:send', { channel, body: trimmed });
+    if (ack.ok) setBody('');
   };
-  return <div className="chat-card"><div className="chat-title">{channel === 'mafia' ? 'Mafia private chat' : channel === 'lobby' ? 'Lobby chat' : 'Public chat'}</div>{messages.map((message) => <p className="message" key={message.id}><strong>{message.senderName}</strong><span>{message.body}</span></p>)}<div className="chat-input"><input value={body} onChange={(event) => setBody(event.target.value)} placeholder="Send message..." /><button onClick={send}>Send</button></div></div>;
+  return <div className="chat-card"><div className="chat-title">{channel === 'mafia' ? 'Mafia private chat' : channel === 'lobby' ? 'Lobby chat' : 'Public chat'}</div>{messages.map((message) => <p className="message" key={message.id}><strong>{message.senderName}</strong><span>{message.body}</span></p>)}<div className="chat-input"><input value={body} onChange={(event) => setBody(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') send(); }} placeholder="Send message..." /><button onClick={send}>Send</button></div></div>;
 }
 
 function CinematicBackdrop() { return <div className="cinematic-bg"><span /><span /><span /><i /></div>; }
